@@ -1,0 +1,129 @@
+<div class="segmentation-container">
+  <header class="section-header">
+    <h2>Image Segmentation</h2>
+    <p>Upload an image and click to select objects for segmentation</p>
+  </header>
+
+  <!-- File Upload -->
+  <div class="upload-section">
+    <label class="upload-btn" for="imageInput">
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/>
+        <line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <span>{{ selectedFile() ? selectedFile()!.name : 'Choose Image' }}</span>
+    </label>
+    <input
+      type="file"
+      id="imageInput"
+      accept="image/*"
+      (change)="onFileSelected($event)"
+      hidden
+    />
+  </div>
+
+  <!-- Instructions -->
+  @if (imagePreview() && points().length === 0) {
+    <div class="instructions">
+      <p><strong>Left-click</strong> to mark foreground (object to segment)</p>
+      <p><strong>Right-click</strong> to mark background (area to exclude)</p>
+    </div>
+  }
+
+  <!-- Image Preview with Click Handler -->
+  @if (imagePreview()) {
+    <div class="preview-container">
+      <div class="image-wrapper">
+        <img
+          #previewImage
+          [src]="imagePreview()"
+          alt="Preview"
+          (load)="onImageLoad($event)"
+          (click)="onCanvasClick($event)"
+          (contextmenu)="onRightClick($event)"
+        />
+        <canvas
+          #canvas
+          class="overlay-canvas"
+          (click)="onCanvasClick($event)"
+          (contextmenu)="onRightClick($event)"
+        ></canvas>
+      </div>
+
+      <!-- Points Info -->
+      @if (points().length > 0) {
+        <div class="points-info">
+          <span class="point-count">
+            {{ points().length }} point(s) selected
+          </span>
+          <div class="point-legend">
+            <span class="legend-item foreground">
+              <span class="dot"></span> Foreground ({{ points().filter(p => p.label === 1).length }})
+            </span>
+            <span class="legend-item background">
+              <span class="dot"></span> Background ({{ points().filter(p => p.label === 0).length }})
+            </span>
+          </div>
+        </div>
+      }
+
+      <!-- Action Buttons -->
+      <div class="actions">
+        <button
+          class="btn btn-secondary"
+          (click)="removeLastPoint()"
+          [disabled]="points().length === 0"
+        >
+          Undo Last Point
+        </button>
+        <button
+          class="btn btn-secondary"
+          (click)="clearPoints()"
+          [disabled]="points().length === 0"
+        >
+          Clear All
+        </button>
+        <button
+          class="btn btn-primary"
+          (click)="segment()"
+          [disabled]="isProcessing() || points().length === 0"
+        >
+          @if (isProcessing()) {
+            <span class="spinner"></span>
+            Processing...
+          } @else {
+            Segment Object
+          }
+        </button>
+      </div>
+    </div>
+  }
+
+  <!-- Error Message -->
+  @if (error()) {
+    <div class="error-message">
+      {{ error() }}
+    </div>
+  }
+
+  <!-- Mask Result -->
+  @if (maskPreview()) {
+    <div class="result-section">
+      <h3>Segmentation Result</h3>
+      <div class="result-images">
+        <div class="result-item">
+          <h4>Original</h4>
+          <img [src]="imagePreview()" alt="Original" />
+        </div>
+        <div class="result-item">
+          <h4>Mask</h4>
+          <img [src]="maskPreview()" alt="Mask" />
+        </div>
+      </div>
+      <button class="btn btn-primary" (click)="downloadMask()">
+        Download Mask
+      </button>
+    </div>
+  }
+</div>
