@@ -1,0 +1,50 @@
+version: '3.8'
+
+# Production configuration - use with:
+# docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    command: uvicorn roto_seg.main:app --host 0.0.0.0 --port 8000 --workers 4
+    environment:
+      - DEBUG=false
+      - ENV=production
+    restart: always
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - DEBUG=false
+      - ENV=production
+    restart: always
+    depends_on:
+      - redis
+      - db
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    ports:
+      - "80:80"
+    restart: always
+    depends_on:
+      - backend
+
+  db:
+    restart: always
+
+  redis:
+    restart: always
