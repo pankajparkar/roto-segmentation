@@ -1,0 +1,129 @@
+<div class="home-container">
+  <!-- Hero Section -->
+  <section class="hero">
+    <h1>Roto-Seg</h1>
+    <p class="tagline">AI-Powered Rotoscoping Automation</p>
+
+    <!-- Connection Status -->
+    <div class="status-card">
+      @if (isLoading()) {
+        <div class="status loading">
+          <span class="spinner"></span>
+          Connecting to API...
+        </div>
+      } @else if (isConnected()) {
+        <div class="status connected">
+          <span class="status-dot"></span>
+          API Connected
+        </div>
+        @if (deviceInfo()) {
+          <div class="device-info">
+            <span class="device-badge" [class.mps]="deviceInfo()!.mps_available" [class.cuda]="deviceInfo()!.cuda_available">
+              {{ deviceInfo()!.recommended_device | uppercase }}
+            </span>
+            <span class="info-text">
+              PyTorch {{ deviceInfo()!.torch_version }} on {{ deviceInfo()!.platform }}
+            </span>
+          </div>
+        }
+      } @else {
+        <div class="status disconnected">
+          <span class="status-dot"></span>
+          API Offline
+        </div>
+        <p class="status-help">
+          Start the backend server:<br>
+          <code>cd backend && python -m uvicorn roto_seg.main:app --port 8001</code>
+        </p>
+        <button class="btn btn-secondary" (click)="checkConnection()">
+          Retry Connection
+        </button>
+      }
+    </div>
+  </section>
+
+  <!-- Features Grid -->
+  <section class="features">
+    <div class="feature-card" routerLink="/segment">
+      <div class="feature-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+          <circle cx="8.5" cy="8.5" r="1.5"/>
+          <polyline points="21 15 16 10 5 21"/>
+        </svg>
+      </div>
+      <h3>Image Segmentation</h3>
+      <p>Upload an image, click to select objects, and generate precise masks using SAM2</p>
+      <span class="feature-action">
+        Try it
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="5" y1="12" x2="19" y2="12"/>
+          <polyline points="12 5 19 12 12 19"/>
+        </svg>
+      </span>
+    </div>
+
+    <div class="feature-card" routerLink="/video-roto">
+      <div class="feature-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="23 7 16 12 23 17 23 7"/>
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+        </svg>
+      </div>
+      <h3>Quick Roto</h3>
+      <p>Upload a video, click once, and export Bezier shapes to Silhouette FXS format</p>
+      <span class="feature-action">
+        Try it
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="5" y1="12" x2="19" y2="12"/>
+          <polyline points="12 5 19 12 12 19"/>
+        </svg>
+      </span>
+    </div>
+  </section>
+
+  <!-- How it Works -->
+  <section class="how-it-works">
+    <h2>How It Works</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-number">1</div>
+        <h4>Upload</h4>
+        <p>Upload your video or image file</p>
+      </div>
+      <div class="step-arrow">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="5" y1="12" x2="19" y2="12"/>
+          <polyline points="12 5 19 12 12 19"/>
+        </svg>
+      </div>
+      <div class="step">
+        <div class="step-number">2</div>
+        <h4>Click</h4>
+        <p>Click on the object you want to track</p>
+      </div>
+      <div class="step-arrow">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="5" y1="12" x2="19" y2="12"/>
+          <polyline points="12 5 19 12 12 19"/>
+        </svg>
+      </div>
+      <div class="step">
+        <div class="step-number">3</div>
+        <h4>AI Segments</h4>
+        <p>SAM2 creates precise masks for every frame</p>
+      </div>
+      <div class="step-arrow">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="5" y1="12" x2="19" y2="12"/>
+          <polyline points="12 5 19 12 12 19"/>
+        </svg>
+      </div>
+      <div class="step">
+        <div class="step-number">4</div>
+        <h4>Export</h4>
+        <p>Download FXS for Silhouette</p>
+      </div>
+    </div>
+  </section>
+</div>

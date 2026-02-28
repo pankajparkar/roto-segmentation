@@ -1,0 +1,157 @@
+<div class="video-roto-container">
+  <header class="section-header">
+    <h2>Quick Roto</h2>
+    <p>Upload a video, click on an object, and export to Silhouette FXS</p>
+  </header>
+
+  <!-- File Upload -->
+  <div class="upload-section">
+    <label class="upload-btn" for="videoInput">
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polygon points="23 7 16 12 23 17 23 7"/>
+        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+      </svg>
+      <span>{{ selectedFile() ? selectedFile()!.name : 'Choose Video' }}</span>
+    </label>
+    <input
+      type="file"
+      id="videoInput"
+      accept="video/*"
+      (change)="onFileSelected($event)"
+      hidden
+    />
+  </div>
+
+  @if (videoUrl()) {
+    <!-- Instructions -->
+    @if (clickX() === null) {
+      <div class="instructions">
+        <p><strong>Step 1:</strong> Scrub to the frame where the object is clearly visible</p>
+        <p><strong>Step 2:</strong> Click on the object you want to track</p>
+      </div>
+    }
+
+    <!-- Video Preview -->
+    <div class="video-container">
+      <div class="video-wrapper">
+        <video
+          #videoPlayer
+          [src]="videoUrl()"
+          (loadedmetadata)="onVideoLoaded()"
+          (click)="onVideoClick($event)"
+          controls
+        ></video>
+        <canvas
+          #canvasOverlay
+          class="canvas-overlay"
+        ></canvas>
+      </div>
+
+      <!-- Click Info -->
+      @if (clickX() !== null && clickY() !== null) {
+        <div class="click-info">
+          <div class="click-details">
+            <span class="label">Selected Point:</span>
+            <span class="value">X: {{ clickX() }}, Y: {{ clickY() }}</span>
+            <span class="separator">|</span>
+            <span class="label">Frame:</span>
+            <span class="value">{{ currentFrame() }}</span>
+          </div>
+          <button class="btn btn-secondary btn-sm" (click)="clearClick()">
+            Clear Selection
+          </button>
+        </div>
+      }
+    </div>
+
+    <!-- Options -->
+    @if (clickX() !== null) {
+      <div class="options-section">
+        <div class="option-group">
+          <label for="objectLabel">Object Label</label>
+          <input
+            type="text"
+            id="objectLabel"
+            [ngModel]="objectLabel()"
+            (ngModelChange)="objectLabel.set($event)"
+            placeholder="e.g., person, car, logo"
+          />
+        </div>
+
+        <div class="option-group">
+          <label for="outputFormat">Output Format</label>
+          <select
+            id="outputFormat"
+            [ngModel]="outputFormat()"
+            (ngModelChange)="outputFormat.set($event)"
+          >
+            <option value="silhouette">Silhouette FXS</option>
+            <option value="nuke">Nuke (coming soon)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Process Button -->
+      <div class="actions">
+        <button
+          class="btn btn-primary btn-lg"
+          (click)="processVideo()"
+          [disabled]="isProcessing()"
+        >
+          @if (isProcessing()) {
+            <span class="spinner"></span>
+            Processing Video...
+          } @else {
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+              <path d="M2 17l10 5 10-5"/>
+              <path d="M2 12l10 5 10-5"/>
+            </svg>
+            Generate Roto Shapes
+          }
+        </button>
+      </div>
+
+      <!-- Progress -->
+      @if (isProcessing()) {
+        <div class="progress-container">
+          <div class="progress-bar">
+            <div class="progress-fill" [style.width.%]="progress()"></div>
+          </div>
+          <span class="progress-text">{{ progress() }}%</span>
+        </div>
+      }
+    }
+  }
+
+  <!-- Error Message -->
+  @if (error()) {
+    <div class="error-message">
+      {{ error() }}
+    </div>
+  }
+
+  <!-- Result -->
+  @if (result()) {
+    <div class="result-section">
+      <div class="result-card">
+        <div class="result-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+            <polyline points="22 4 12 14.01 9 11.01"/>
+          </svg>
+        </div>
+        <h3>Roto Complete!</h3>
+        <p>Your FXS file is ready for import into Silhouette</p>
+        <button class="btn btn-primary" (click)="downloadResult()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Download {{ result()!.filename }}
+        </button>
+      </div>
+    </div>
+  }
+</div>
