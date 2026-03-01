@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # API
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:5173"]
+    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:4200", "http://localhost:5173", "http://127.0.0.1:4200"]
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/rotoseg"
@@ -49,7 +49,7 @@ class Settings(BaseSettings):
 
     # AI Models
     MODEL_PATH: str = "./models"
-    SAM2_MODEL: str = "sam2_hiera_small.pt"  # Smaller model for 16GB RAM
+    SAM2_MODEL: str = "sam2_hiera_base_plus.pt"  # base+ model - better quality
     DEVICE: str = get_default_device()  # Auto-detect: mps (M1), cuda, or cpu
 
     # Celery
