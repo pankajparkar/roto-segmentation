@@ -80,8 +80,38 @@
 
     <!-- Frame Selection Mode -->
     @if (isSelectMode()) {
+      <!-- Selection Mode Toggle -->
+      <div class="mode-toggle">
+        <button
+          class="mode-btn"
+          [class.active]="selectionMode() === 'point'"
+          (click)="setSelectionMode('point')"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M12 2v4m0 12v4M2 12h4m12 0h4"/>
+          </svg>
+          Point Click
+        </button>
+        <button
+          class="mode-btn"
+          [class.active]="selectionMode() === 'box'"
+          (click)="setSelectionMode('box')"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2"/>
+            <path d="M3 9h18M9 3v18"/>
+          </svg>
+          Draw Box
+        </button>
+      </div>
+
       <div class="instructions select-mode">
-        <p><strong>Click on the object</strong> you want to track (e.g., the car)</p>
+        @if (selectionMode() === 'point') {
+          <p><strong>Click on the object</strong> you want to track (e.g., the car)</p>
+        } @else {
+          <p><strong>Draw a box</strong> around the object you want to track</p>
+        }
       </div>
 
       <div class="frame-container">
@@ -99,7 +129,12 @@
           <canvas
             #frameCanvas
             class="frame-canvas"
+            [class.box-mode]="selectionMode() === 'box'"
             (click)="onFrameClick($event)"
+            (mousedown)="onFrameMouseDown($event)"
+            (mousemove)="onFrameMouseMove($event)"
+            (mouseup)="onFrameMouseUp($event)"
+            (mouseleave)="onFrameMouseLeave()"
           ></canvas>
           <canvas
             #overlayCanvas
@@ -113,12 +148,17 @@
           }
         </div>
 
-        <!-- Click Info -->
-        @if (clickX() !== null && clickY() !== null) {
+        <!-- Selection Info -->
+        @if (hasSelection()) {
           <div class="click-info">
             <div class="click-details">
-              <span class="label">Selected Point:</span>
-              <span class="value">X: {{ clickX() }}, Y: {{ clickY() }}</span>
+              @if (selectionMode() === 'point') {
+                <span class="label">Selected Point:</span>
+                <span class="value">X: {{ clickX() }}, Y: {{ clickY() }}</span>
+              } @else {
+                <span class="label">Selected Box:</span>
+                <span class="value">{{ getBoxCoordinates()?.[0] }}, {{ getBoxCoordinates()?.[1] }} to {{ getBoxCoordinates()?.[2] }}, {{ getBoxCoordinates()?.[3] }}</span>
+              }
               <span class="separator">|</span>
               <span class="label">Frame:</span>
               <span class="value">{{ currentFrame() }}</span>
@@ -127,7 +167,7 @@
                 <span class="preview-ready">Preview Ready</span>
               }
             </div>
-            <button class="btn btn-secondary btn-sm" (click)="clearClick()">
+            <button class="btn btn-secondary btn-sm" (click)="clearSelection()">
               Clear Selection
             </button>
           </div>
@@ -135,7 +175,7 @@
       </div>
 
       <!-- Options -->
-      @if (clickX() !== null) {
+      @if (hasSelection()) {
         <div class="options-section">
           <div class="option-group">
             <label for="objectLabel">Object Label</label>

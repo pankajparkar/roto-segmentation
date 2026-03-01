@@ -230,9 +230,12 @@ class RotoPipeline:
         if initial_frame is None:
             raise ValueError(f"Could not read frame {prompt.frame_idx}")
 
-        # Debug: Log frame dimensions and click point
+        # Debug: Log frame dimensions and selection
         frame_h, frame_w = initial_frame.shape[:2]
-        print(f"[DEBUG] Frame {prompt.frame_idx}: shape=({frame_w}x{frame_h}), click_point={prompt.points}, labels={prompt.point_labels}")
+        if prompt.box is not None:
+            print(f"[DEBUG] Frame {prompt.frame_idx}: shape=({frame_w}x{frame_h}), box={prompt.box}")
+        else:
+            print(f"[DEBUG] Frame {prompt.frame_idx}: shape=({frame_w}x{frame_h}), click_point={prompt.points}, labels={prompt.point_labels}")
 
         # Validate click point is within frame bounds
         if prompt.points is not None:

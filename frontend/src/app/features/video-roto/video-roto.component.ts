@@ -21,10 +21,18 @@ export class VideoRotoComponent {
   isSelectMode = signal(false);
   capturedFrame = signal<string | null>(null);
 
-  // Click position
+  // Selection mode: 'point' or 'box'
+  selectionMode = signal<'point' | 'box'>('point');
+
+  // Click position (point mode)
   clickX = signal<number | null>(null);
   clickY = signal<number | null>(null);
   currentFrame = signal(0);
+
+  // Bounding box state (box mode)
+  boxStart = signal<{ x: number; y: number } | null>(null);
+  boxEnd = signal<{ x: number; y: number } | null>(null);
+  isDrawingBox = signal(false);
 
   // Form inputs
   objectLabel = signal('object');
@@ -211,7 +219,22 @@ export class VideoRotoComponent {
     img.src = this.capturedFrame()!;
   }
 
+  // Convert display coordinates to video coordinates
+  private displayToVideoCoords(displayX: number, displayY: number, rect: DOMRect): { x: number; y: number } {
+    const scaleX = this.videoWidth / rect.width;
+    const scaleY = this.videoHeight / rect.height;
+    const x = Math.round(displayX * scaleX);
+    const y = Math.round(displayY * scaleY);
+    return {
+      x: Math.max(0, Math.min(x, this.videoWidth - 1)),
+      y: Math.max(0, Math.min(y, this.videoHeight - 1))
+    };
+  }
+
   onFrameClick(event: MouseEvent): void {
+    // In box mode, clicks are handled by mousedown/up
+    if (this.selectionMode() === 'box') return;
+
     const canvas = this.frameCanvas()?.nativeElement;
     if (!canvas) return;
 
@@ -222,52 +245,271 @@ export class VideoRotoComponent {
     }
 
     const rect = canvas.getBoundingClientRect();
-
-    // Get click position relative to canvas element (using rendered size from getBoundingClientRect)
     const clickX = event.clientX - rect.left;
     const clickY = event.clientY - rect.top;
+    const videoCoords = this.displayToVideoCoords(clickX, clickY, rect);
 
-    // Use the rendered size (rect) for scaling, not canvas.width
-    // This accounts for any CSS transforms or browser scaling
-    const scaleX = this.videoWidth / rect.width;
-    const scaleY = this.videoHeight / rect.height;
+    console.log('Point Click:', { displayX: clickX, displayY: clickY, videoX: videoCoords.x, videoY: videoCoords.y });
 
-    const x = Math.round(clickX * scaleX);
-    const y = Math.round(clickY * scaleY);
+    this.clickX.set(videoCoords.x);
+    this.clickY.set(videoCoords.y);
 
-    // Clamp to valid video coordinates
-    const clampedX = Math.max(0, Math.min(x, this.videoWidth - 1));
-    const clampedY = Math.max(0, Math.min(y, this.videoHeight - 1));
+    this.drawClickMarker(clickX, clickY, videoCoords.x, videoCoords.y);
 
-    // Debug logging
-    console.log('Click Debug:', {
-      clientX: event.clientX,
-      clientY: event.clientY,
-      rectLeft: rect.left,
-      rectTop: rect.top,
-      rectWidth: rect.width,
-      rectHeight: rect.height,
-      clickX,
-      clickY,
-      canvasWidth: canvas.width,
-      canvasHeight: canvas.height,
-      videoWidth: this.videoWidth,
-      videoHeight: this.videoHeight,
-      scaleX,
-      scaleY,
-      rawX: x,
-      rawY: y,
-      finalX: clampedX,
-      finalY: clampedY
-    });
+    // Get mask preview with point
+    this.getSegmentationPreview(videoCoords.x, videoCoords.y);
+  }
 
-    this.clickX.set(clampedX);
-    this.clickY.set(clampedY);
+  onFrameMouseDown(event: MouseEvent): void {
+    if (this.selectionMode() !== 'box') return;
 
-    this.drawClickMarker(clickX, clickY, clampedX, clampedY);
+    const canvas = this.frameCanvas()?.nativeElement;
+    if (!canvas) return;
 
-    // Get mask preview
-    this.getSegmentationPreview(clampedX, clampedY);
+    if (this.videoWidth === 0 || this.videoHeight === 0) {
+      this.error.set('Video dimensions not available. Please reload the video.');
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const displayX = event.clientX - rect.left;
+    const displayY = event.clientY - rect.top;
+    const videoCoords = this.displayToVideoCoords(displayX, displayY, rect);
+
+    this.isDrawingBox.set(true);
+    this.boxStart.set(videoCoords);
+    this.boxEnd.set(videoCoords);
+
+    // Clear previous selection
+    this.clearOverlay();
+  }
+
+  onFrameMouseMove(event: MouseEvent): void {
+    if (!this.isDrawingBox() || this.selectionMode() !== 'box') return;
+
+    const canvas = this.frameCanvas()?.nativeElement;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const displayX = event.clientX - rect.left;
+    const displayY = event.clientY - rect.top;
+    const videoCoords = this.displayToVideoCoords(displayX, displayY, rect);
+
+    this.boxEnd.set(videoCoords);
+
+    // Draw the box preview
+    this.drawBoxPreview();
+  }
+
+  onFrameMouseUp(event: MouseEvent): void {
+    if (!this.isDrawingBox() || this.selectionMode() !== 'box') return;
+
+    const canvas = this.frameCanvas()?.nativeElement;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const displayX = event.clientX - rect.left;
+    const displayY = event.clientY - rect.top;
+    const videoCoords = this.displayToVideoCoords(displayX, displayY, rect);
+
+    this.boxEnd.set(videoCoords);
+    this.isDrawingBox.set(false);
+
+    const start = this.boxStart();
+    const end = this.boxEnd();
+
+    if (start && end) {
+      // Ensure box has minimum size (at least 10px in video coords)
+      const boxWidth = Math.abs(end.x - start.x);
+      const boxHeight = Math.abs(end.y - start.y);
+
+      if (boxWidth < 10 || boxHeight < 10) {
+        console.log('Box too small, ignoring');
+        this.clearSelection();
+        return;
+      }
+
+      console.log('Box Selection:', {
+        start,
+        end,
+        width: boxWidth,
+        height: boxHeight
+      });
+
+      // Draw final box
+      this.drawBoxPreview();
+
+      // Get mask preview with box
+      this.getSegmentationPreviewWithBox();
+    }
+  }
+
+  onFrameMouseLeave(): void {
+    // If drawing was in progress, cancel it
+    if (this.isDrawingBox()) {
+      this.isDrawingBox.set(false);
+      this.boxStart.set(null);
+      this.boxEnd.set(null);
+      this.clearOverlay();
+    }
+  }
+
+  private drawBoxPreview(): void {
+    const frameCanvas = this.frameCanvas()?.nativeElement;
+    const overlayCanvas = this.overlayCanvas()?.nativeElement;
+    const start = this.boxStart();
+    const end = this.boxEnd();
+
+    if (!frameCanvas || !overlayCanvas || !start || !end) return;
+
+    // Match overlay size to frame canvas
+    overlayCanvas.width = frameCanvas.width;
+    overlayCanvas.height = frameCanvas.height;
+    overlayCanvas.style.width = `${frameCanvas.width}px`;
+    overlayCanvas.style.height = `${frameCanvas.height}px`;
+
+    const ctx = overlayCanvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+    // Convert video coords to display coords
+    const scaleX = overlayCanvas.width / this.videoWidth;
+    const scaleY = overlayCanvas.height / this.videoHeight;
+
+    const x1 = Math.min(start.x, end.x) * scaleX;
+    const y1 = Math.min(start.y, end.y) * scaleY;
+    const x2 = Math.max(start.x, end.x) * scaleX;
+    const y2 = Math.max(start.y, end.y) * scaleY;
+    const width = x2 - x1;
+    const height = y2 - y1;
+
+    // Draw semi-transparent fill
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.2)';
+    ctx.fillRect(x1, y1, width, height);
+
+    // Draw dashed border
+    ctx.strokeStyle = '#3b82f6';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(x1, y1, width, height);
+
+    // Draw corner handles
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#3b82f6';
+    const handleSize = 8;
+    ctx.fillRect(x1 - handleSize / 2, y1 - handleSize / 2, handleSize, handleSize);
+    ctx.fillRect(x2 - handleSize / 2, y1 - handleSize / 2, handleSize, handleSize);
+    ctx.fillRect(x1 - handleSize / 2, y2 - handleSize / 2, handleSize, handleSize);
+    ctx.fillRect(x2 - handleSize / 2, y2 - handleSize / 2, handleSize, handleSize);
+
+    // Draw coordinate labels
+    ctx.font = 'bold 11px monospace';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    const topLabel = `(${Math.min(start.x, end.x)}, ${Math.min(start.y, end.y)})`;
+    const bottomLabel = `(${Math.max(start.x, end.x)}, ${Math.max(start.y, end.y)})`;
+    const topLabelWidth = ctx.measureText(topLabel).width;
+    const bottomLabelWidth = ctx.measureText(bottomLabel).width;
+
+    ctx.fillRect(x1, y1 - 18, topLabelWidth + 6, 16);
+    ctx.fillRect(x2 - bottomLabelWidth - 6, y2 + 4, bottomLabelWidth + 6, 16);
+
+    ctx.fillStyle = '#3b82f6';
+    ctx.fillText(topLabel, x1 + 3, y1 - 5);
+    ctx.fillText(bottomLabel, x2 - bottomLabelWidth - 3, y2 + 16);
+  }
+
+  private async getSegmentationPreviewWithBox(): Promise<void> {
+    const capturedFrame = this.capturedFrame();
+    const start = this.boxStart();
+    const end = this.boxEnd();
+
+    if (!capturedFrame || !start || !end) return;
+
+    this.isLoadingPreview.set(true);
+    this.maskPreviewUrl.set(null);
+
+    try {
+      const response = await fetch(capturedFrame);
+      const blob = await response.blob();
+      const file = new File([blob], 'frame.jpg', { type: 'image/jpeg' });
+
+      // Create box coordinates [x1, y1, x2, y2]
+      const box = [
+        Math.min(start.x, end.x),
+        Math.min(start.y, end.y),
+        Math.max(start.x, end.x),
+        Math.max(start.y, end.y)
+      ];
+
+      console.log('Requesting segmentation with box:', box);
+
+      const maskBlob = await this.api.segmentImage(file, undefined, box).toPromise();
+
+      if (maskBlob) {
+        const maskUrl = URL.createObjectURL(maskBlob);
+        this.maskPreviewUrl.set(maskUrl);
+        this.drawMaskOverlayWithBox(maskUrl);
+      }
+    } catch (err) {
+      console.error('Box preview failed:', err);
+    } finally {
+      this.isLoadingPreview.set(false);
+    }
+  }
+
+  private drawMaskOverlayWithBox(maskUrl: string): void {
+    const frameCanvas = this.frameCanvas()?.nativeElement;
+    const overlayCanvas = this.overlayCanvas()?.nativeElement;
+
+    if (!frameCanvas || !overlayCanvas) return;
+
+    const maskImg = new Image();
+    maskImg.onload = () => {
+      const ctx = overlayCanvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+      // Create temp canvas for mask processing
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = overlayCanvas.width;
+      tempCanvas.height = overlayCanvas.height;
+      const tempCtx = tempCanvas.getContext('2d');
+      if (!tempCtx) return;
+
+      tempCtx.drawImage(maskImg, 0, 0, overlayCanvas.width, overlayCanvas.height);
+      const maskData = tempCtx.getImageData(0, 0, overlayCanvas.width, overlayCanvas.height);
+      const data = maskData.data;
+
+      // Create green overlay for mask
+      for (let i = 0; i < data.length; i += 4) {
+        const maskValue = data[i];
+        if (maskValue > 128) {
+          data[i] = 34;
+          data[i + 1] = 197;
+          data[i + 2] = 94;
+          data[i + 3] = 100;
+        } else {
+          data[i + 3] = 0;
+        }
+      }
+
+      ctx.putImageData(maskData, 0, 0);
+      this.drawMaskBorder(ctx, maskData);
+
+      // Redraw box on top
+      this.drawBoxPreview();
+    };
+    maskImg.src = maskUrl;
+  }
+
+  private clearOverlay(): void {
+    const overlayCanvas = this.overlayCanvas()?.nativeElement;
+    if (overlayCanvas) {
+      const ctx = overlayCanvas.getContext('2d');
+      ctx?.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+    }
   }
 
   private async getSegmentationPreview(x: number, y: number): Promise<void> {
@@ -520,15 +762,46 @@ export class VideoRotoComponent {
   }
 
   clearClick(): void {
+    this.clearSelection();
+  }
+
+  clearSelection(): void {
     this.clickX.set(null);
     this.clickY.set(null);
+    this.boxStart.set(null);
+    this.boxEnd.set(null);
+    this.isDrawingBox.set(false);
     this.maskPreviewUrl.set(null);
+    this.clearOverlay();
+  }
 
-    const overlayCanvas = this.overlayCanvas()?.nativeElement;
-    if (overlayCanvas) {
-      const ctx = overlayCanvas.getContext('2d');
-      ctx?.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  setSelectionMode(mode: 'point' | 'box'): void {
+    if (this.selectionMode() !== mode) {
+      this.selectionMode.set(mode);
+      this.clearSelection();
     }
+  }
+
+  hasSelection(): boolean {
+    if (this.selectionMode() === 'point') {
+      return this.clickX() !== null && this.clickY() !== null;
+    } else {
+      const start = this.boxStart();
+      const end = this.boxEnd();
+      return start !== null && end !== null && !this.isDrawingBox();
+    }
+  }
+
+  getBoxCoordinates(): [number, number, number, number] | null {
+    const start = this.boxStart();
+    const end = this.boxEnd();
+    if (!start || !end) return null;
+    return [
+      Math.min(start.x, end.x),
+      Math.min(start.y, end.y),
+      Math.max(start.x, end.x),
+      Math.max(start.y, end.y)
+    ];
   }
 
   private resetState(): void {
@@ -536,6 +809,9 @@ export class VideoRotoComponent {
     this.capturedFrame.set(null);
     this.clickX.set(null);
     this.clickY.set(null);
+    this.boxStart.set(null);
+    this.boxEnd.set(null);
+    this.isDrawingBox.set(false);
     this.currentFrame.set(0);
     this.error.set(null);
     this.result.set(null);
@@ -546,19 +822,24 @@ export class VideoRotoComponent {
 
   async processVideo(): Promise<void> {
     const file = this.selectedFile();
-    const x = this.clickX();
-    const y = this.clickY();
 
-    if (!file || x === null || y === null) {
-      this.error.set('Please select a video and click on the object to track');
+    if (!file || !this.hasSelection()) {
+      this.error.set('Please select a video and select the object to track (click or draw box)');
       return;
     }
+
+    const isBoxMode = this.selectionMode() === 'box';
+    const boxCoords = this.getBoxCoordinates();
+    const x = this.clickX();
+    const y = this.clickY();
 
     // Debug: Log what we're sending to the API
     console.log('API Request:', {
       file: file.name,
+      mode: this.selectionMode(),
       clickX: x,
       clickY: y,
+      box: boxCoords,
       frame: this.currentFrame(),
       videoWidth: this.videoWidth,
       videoHeight: this.videoHeight,
@@ -573,11 +854,12 @@ export class VideoRotoComponent {
     try {
       const resultBlob = await this.api.quickRoto(
         file,
-        x,
-        y,
+        isBoxMode ? null : x,
+        isBoxMode ? null : y,
         this.currentFrame(),
         this.objectLabel(),
-        this.outputFormat()
+        this.outputFormat(),
+        isBoxMode ? boxCoords ?? undefined : undefined
       ).toPromise();
 
       this.progress.set(100);

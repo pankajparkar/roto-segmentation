@@ -52,23 +52,31 @@ export class ApiService {
   }
 
   /**
-   * Quick rotoscoping - upload video, click, get FXS
+   * Quick rotoscoping - upload video, click or draw box, get FXS
+   * Supports both point selection (clickX, clickY) and box selection (box)
    */
   quickRoto(
     video: File,
-    clickX: number,
-    clickY: number,
+    clickX: number | null,
+    clickY: number | null,
     frameIdx: number = 0,
     label: string = 'object',
-    outputFormat: string = 'silhouette'
+    outputFormat: string = 'silhouette',
+    box?: [number, number, number, number]
   ): Observable<Blob> {
     const formData = new FormData();
     formData.append('video', video);
-    formData.append('click_x', clickX.toString());
-    formData.append('click_y', clickY.toString());
     formData.append('frame_idx', frameIdx.toString());
     formData.append('label', label);
     formData.append('output_format', outputFormat);
+
+    // Either point or box selection
+    if (box) {
+      formData.append('box', JSON.stringify(box));
+    } else if (clickX !== null && clickY !== null) {
+      formData.append('click_x', clickX.toString());
+      formData.append('click_y', clickY.toString());
+    }
 
     return this.http.post(`${this.baseUrl}/api/v1/segment/quick-roto`, formData, {
       responseType: 'blob'

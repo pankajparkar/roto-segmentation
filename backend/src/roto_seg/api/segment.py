@@ -153,9 +153,48 @@ async def segment_image(
             detail=f"Segmentation failed: {str(e)}"
         )
 
-    # Get best mask
-    best_idx = scores.argmax()
+    # Smart mask selection: SAM2 returns 3 masks with multimask_output=True
+    # - Mask 0: Small/tight mask
+    # - Mask 1: Medium mask (usually the object)
+    # - Mask 2: Large mask (often includes background)
+    #
+    # Instead of just picking highest score, we prefer masks that:
+    # 1. Cover a reasonable portion (not too small <1%, not too large >70%)
+    # 2. Have good confidence score
+
+    print(f"[DEBUG] Segmentation: {len(masks)} masks returned")
+    for i, (mask, score) in enumerate(zip(masks, scores)):
+        coverage = mask.sum() / mask.size * 100
+        print(f"[DEBUG]   Mask {i}: score={score:.3f}, coverage={coverage:.1f}%")
+
+    # Calculate coverage for each mask
+    coverages = [mask.sum() / mask.size * 100 for mask in masks]
+
+    # Find best mask: prefer medium-sized masks with good scores
+    best_idx = None
+    best_combined_score = -1
+
+    for i, (score, coverage) in enumerate(zip(scores, coverages)):
+        # Penalize very small masks (<1%) and very large masks (>70%)
+        if coverage < 1:
+            size_penalty = 0.3
+        elif coverage > 70:
+            size_penalty = 0.5
+        elif coverage > 50:
+            size_penalty = 0.8
+        else:
+            size_penalty = 1.0
+
+        combined = float(score) * size_penalty
+        print(f"[DEBUG]   Mask {i}: combined_score={combined:.3f} (score={score:.3f} * penalty={size_penalty})")
+
+        if combined > best_combined_score:
+            best_combined_score = combined
+            best_idx = i
+
     best_mask = masks[best_idx]
+    mask_coverage = coverages[best_idx]
+    print(f"[DEBUG] Selected mask {best_idx}: score={scores[best_idx]:.3f}, coverage={mask_coverage:.1f}%")
 
     # Convert to PNG and return
     mask_uint8 = (best_mask * 255).astype(np.uint8)
@@ -180,34 +219,75 @@ async def segment_image(
 @router.post("/quick-roto")
 async def quick_roto(
     video: UploadFile = File(...),
-    click_x: int = Form(...),
-    click_y: int = Form(...),
+    click_x: Optional[int] = Form(None),
+    click_y: Optional[int] = Form(None),
+    box: Optional[str] = Form(None),  # JSON: [x1, y1, x2, y2]
     frame_idx: int = Form(0),
     label: str = Form("object"),
     output_format: str = Form("silhouette"),
 ):
     """
-    Quick rotoscoping with a single click.
+    Quick rotoscoping with a single click or bounding box.
 
-    Upload a video, click on an object, get an FXS file.
+    Upload a video, click on an object OR draw a box, get an FXS file.
+    Supports both point selection and box selection for SAM2.
 
     This is a synchronous endpoint for small videos.
     For large videos, use the async job API.
 
-    Example:
+    Examples:
+        # Point selection:
         curl -X POST "http://localhost:8000/api/v1/segment/quick-roto" \
             -F "video=@clip.mp4" \
             -F "click_x=500" \
             -F "click_y=300" \
             -F "frame_idx=0" \
             -F "label=person"
+
+        # Box selection:
+        curl -X POST "http://localhost:8000/api/v1/segment/quick-roto" \
+            -F "video=@clip.mp4" \
+            -F 'box=[100, 150, 400, 350]' \
+            -F "frame_idx=0" \
+            -F "label=car"
     """
     import logging
+    import json
     logger = logging.getLogger(__name__)
 
+    # Parse box if provided
+    box_coords = None
+    if box:
+        try:
+            box_coords = json.loads(box)
+            if len(box_coords) != 4:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Box must have 4 coordinates: [x1, y1, x2, y2]"
+                )
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid box format. Expected JSON array [x1, y1, x2, y2]: {e}"
+            )
+
+    # Validate we have either point or box
+    has_point = click_x is not None and click_y is not None
+    has_box = box_coords is not None
+
+    if not has_point and not has_box:
+        raise HTTPException(
+            status_code=400,
+            detail="Must provide either click coordinates (click_x, click_y) or box coordinates"
+        )
+
     # Debug log the received coordinates
-    logger.info(f"Quick Roto Request: click_x={click_x}, click_y={click_y}, frame_idx={frame_idx}, label={label}, format={output_format}")
-    print(f"[DEBUG] Quick Roto: click=({click_x}, {click_y}), frame={frame_idx}, label={label}, format={output_format}")
+    if has_box:
+        logger.info(f"Quick Roto Request: box={box_coords}, frame_idx={frame_idx}, label={label}, format={output_format}")
+        print(f"[DEBUG] Quick Roto: box={box_coords}, frame={frame_idx}, label={label}, format={output_format}")
+    else:
+        logger.info(f"Quick Roto Request: click_x={click_x}, click_y={click_y}, frame_idx={frame_idx}, label={label}, format={output_format}")
+        print(f"[DEBUG] Quick Roto: click=({click_x}, {click_y}), frame={frame_idx}, label={label}, format={output_format}")
 
     from roto_seg.services.roto_pipeline import RotoPipeline, SegmentationPrompt
 
@@ -232,16 +312,25 @@ async def quick_roto(
 
         # Run pipeline
         pipeline = RotoPipeline()
+
+        # Create prompt based on selection mode
+        if has_box:
+            prompt = SegmentationPrompt(
+                frame_idx=frame_idx,
+                box=np.array(box_coords),
+                label=label,
+            )
+        else:
+            prompt = SegmentationPrompt(
+                frame_idx=frame_idx,
+                points=np.array([[click_x, click_y]]),
+                point_labels=np.array([1]),
+                label=label,
+            )
+
         result = pipeline.process(
             video_path=str(video_path),
-            prompts=[
-                SegmentationPrompt(
-                    frame_idx=frame_idx,
-                    points=np.array([[click_x, click_y]]),
-                    point_labels=np.array([1]),
-                    label=label,
-                )
-            ],
+            prompts=[prompt],
             output_path=str(output_path),
             output_format=output_format,
         )

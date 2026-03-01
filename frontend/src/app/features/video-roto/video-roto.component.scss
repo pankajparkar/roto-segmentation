@@ -49,6 +49,47 @@
   }
 }
 
+.mode-toggle {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+
+  .mode-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1.25rem;
+    background: #f3f4f6;
+    border: 2px solid #e5e7eb;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #6b7280;
+    cursor: pointer;
+    transition: all 0.2s;
+
+    &:hover {
+      background: #e5e7eb;
+      border-color: #d1d5db;
+    }
+
+    &.active {
+      background: #3b82f6;
+      border-color: #3b82f6;
+      color: white;
+
+      svg {
+        color: white;
+      }
+    }
+
+    svg {
+      color: #9ca3af;
+    }
+  }
+}
+
 .instructions {
   background: #dbeafe;
   border: 1px solid #3b82f6;
@@ -137,6 +178,10 @@
       border-radius: 0.5rem;
       cursor: crosshair;
       border: 2px solid #374151;
+
+      &.box-mode {
+        cursor: cell;
+      }
     }
 
     .overlay-canvas {
