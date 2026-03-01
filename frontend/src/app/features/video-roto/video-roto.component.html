@@ -1,7 +1,7 @@
 <div class="video-roto-container">
   <header class="section-header">
     <h2>Quick Roto</h2>
-    <p>Upload a video, click on an object, and export to Silhouette FXS</p>
+    <p>Upload a video, click on an object, and export to Silhouette FXS or EXR matte sequence</p>
   </header>
 
   <!-- File Upload -->
@@ -23,103 +23,175 @@
   </div>
 
   @if (videoUrl()) {
-    <!-- Instructions -->
-    @if (clickX() === null) {
+    <!-- Video Scrub Mode -->
+    @if (!isSelectMode()) {
       <div class="instructions">
-        <p><strong>Step 1:</strong> Scrub to the frame where the object is clearly visible</p>
-        <p><strong>Step 2:</strong> Click on the object you want to track</p>
+        <p><strong>Step 1:</strong> Use the video player to scrub to the frame where the object is clearly visible</p>
+        <p><strong>Step 2:</strong> Click "Capture Frame" to freeze the frame and select the object</p>
       </div>
-    }
 
-    <!-- Video Preview -->
-    <div class="video-container">
-      <div class="video-wrapper">
+      <div class="video-container">
         <video
           #videoPlayer
           [src]="videoUrl()"
           (loadedmetadata)="onVideoLoaded()"
-          (click)="onVideoClick($event)"
+          (error)="onVideoError()"
           controls
+          playsinline
+          preload="auto"
         ></video>
-        <canvas
-          #canvasOverlay
-          class="canvas-overlay"
-        ></canvas>
-      </div>
 
-      <!-- Click Info -->
-      @if (clickX() !== null && clickY() !== null) {
-        <div class="click-info">
-          <div class="click-details">
-            <span class="label">Selected Point:</span>
-            <span class="value">X: {{ clickX() }}, Y: {{ clickY() }}</span>
-            <span class="separator">|</span>
-            <span class="label">Frame:</span>
-            <span class="value">{{ currentFrame() }}</span>
-          </div>
-          <button class="btn btn-secondary btn-sm" (click)="clearClick()">
-            Clear Selection
+        <div class="video-controls">
+          <button class="btn btn-secondary" (click)="togglePlay()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              @if (isPlaying()) {
+                <rect x="6" y="4" width="4" height="16"/>
+                <rect x="14" y="4" width="4" height="16"/>
+              } @else {
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              }
+            </svg>
+            {{ isPlaying() ? 'Pause' : 'Play' }}
+          </button>
+          <button class="btn btn-secondary" (click)="stepBackward()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="11 19 2 12 11 5 11 19"/>
+              <polygon points="22 19 13 12 22 5 22 19"/>
+            </svg>
+            -1 Frame
+          </button>
+          <button class="btn btn-secondary" (click)="stepForward()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="13 19 22 12 13 5 13 19"/>
+              <polygon points="2 19 11 12 2 5 2 19"/>
+            </svg>
+            +1 Frame
+          </button>
+          <button class="btn btn-primary btn-lg" (click)="captureCurrentFrame()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+            Capture Frame
           </button>
         </div>
-      }
-    </div>
+      </div>
+    }
 
-    <!-- Options -->
-    @if (clickX() !== null) {
-      <div class="options-section">
-        <div class="option-group">
-          <label for="objectLabel">Object Label</label>
-          <input
-            type="text"
-            id="objectLabel"
-            [ngModel]="objectLabel()"
-            (ngModelChange)="objectLabel.set($event)"
-            placeholder="e.g., person, car, logo"
-          />
-        </div>
-
-        <div class="option-group">
-          <label for="outputFormat">Output Format</label>
-          <select
-            id="outputFormat"
-            [ngModel]="outputFormat()"
-            (ngModelChange)="outputFormat.set($event)"
-          >
-            <option value="silhouette">Silhouette FXS</option>
-            <option value="nuke">Nuke (coming soon)</option>
-          </select>
-        </div>
+    <!-- Frame Selection Mode -->
+    @if (isSelectMode()) {
+      <div class="instructions select-mode">
+        <p><strong>Click on the object</strong> you want to track (e.g., the car)</p>
       </div>
 
-      <!-- Process Button -->
-      <div class="actions">
-        <button
-          class="btn btn-primary btn-lg"
-          (click)="processVideo()"
-          [disabled]="isProcessing()"
-        >
-          @if (isProcessing()) {
-            <span class="spinner"></span>
-            Processing Video...
-          } @else {
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-              <path d="M2 17l10 5 10-5"/>
-              <path d="M2 12l10 5 10-5"/>
+      <div class="frame-container">
+        <div class="frame-header">
+          <span class="frame-info">Frame {{ currentFrame() }}</span>
+          <button class="btn btn-secondary btn-sm" (click)="backToVideo()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M19 12H5M12 19l-7-7 7-7"/>
             </svg>
-            Generate Roto Shapes
+            Back to Video
+          </button>
+        </div>
+
+        <div class="frame-wrapper">
+          <canvas
+            #frameCanvas
+            class="frame-canvas"
+            (click)="onFrameClick($event)"
+          ></canvas>
+          <canvas
+            #overlayCanvas
+            class="overlay-canvas"
+          ></canvas>
+          @if (isLoadingPreview()) {
+            <div class="preview-loading">
+              <span class="spinner"></span>
+              <span>Detecting object...</span>
+            </div>
           }
-        </button>
+        </div>
+
+        <!-- Click Info -->
+        @if (clickX() !== null && clickY() !== null) {
+          <div class="click-info">
+            <div class="click-details">
+              <span class="label">Selected Point:</span>
+              <span class="value">X: {{ clickX() }}, Y: {{ clickY() }}</span>
+              <span class="separator">|</span>
+              <span class="label">Frame:</span>
+              <span class="value">{{ currentFrame() }}</span>
+              @if (maskPreviewUrl()) {
+                <span class="separator">|</span>
+                <span class="preview-ready">Preview Ready</span>
+              }
+            </div>
+            <button class="btn btn-secondary btn-sm" (click)="clearClick()">
+              Clear Selection
+            </button>
+          </div>
+        }
       </div>
 
-      <!-- Progress -->
-      @if (isProcessing()) {
-        <div class="progress-container">
-          <div class="progress-bar">
-            <div class="progress-fill" [style.width.%]="progress()"></div>
+      <!-- Options -->
+      @if (clickX() !== null) {
+        <div class="options-section">
+          <div class="option-group">
+            <label for="objectLabel">Object Label</label>
+            <input
+              type="text"
+              id="objectLabel"
+              [ngModel]="objectLabel()"
+              (ngModelChange)="objectLabel.set($event)"
+              placeholder="e.g., person, car, logo"
+            />
           </div>
-          <span class="progress-text">{{ progress() }}%</span>
+
+          <div class="option-group">
+            <label for="outputFormat">Output Format</label>
+            <select
+              id="outputFormat"
+              [ngModel]="outputFormat()"
+              (ngModelChange)="outputFormat.set($event)"
+            >
+              <option value="silhouette">Silhouette FXS (Shapes)</option>
+              <option value="exr">EXR Matte Sequence</option>
+              <option value="nuke">Nuke (coming soon)</option>
+            </select>
+          </div>
         </div>
+
+        <!-- Process Button -->
+        <div class="actions">
+          <button
+            class="btn btn-primary btn-lg"
+            (click)="processVideo()"
+            [disabled]="isProcessing()"
+          >
+            @if (isProcessing()) {
+              <span class="spinner"></span>
+              Processing Video...
+            } @else {
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                <path d="M2 17l10 5 10-5"/>
+                <path d="M2 12l10 5 10-5"/>
+              </svg>
+              Generate Roto Shapes
+            }
+          </button>
+        </div>
+
+        <!-- Progress -->
+        @if (isProcessing()) {
+          <div class="progress-container">
+            <div class="progress-bar">
+              <div class="progress-fill" [style.width.%]="progress()"></div>
+            </div>
+            <span class="progress-text">{{ progress() }}%</span>
+          </div>
+        }
       }
     }
   }
@@ -142,7 +214,7 @@
           </svg>
         </div>
         <h3>Roto Complete!</h3>
-        <p>Your FXS file is ready for import into Silhouette</p>
+        <p>Your file is ready for import</p>
         <button class="btn btn-primary" (click)="downloadResult()">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>

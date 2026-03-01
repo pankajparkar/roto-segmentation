@@ -107,12 +107,19 @@ class SegmentationService:
     def _get_config_name(self, model_name: str) -> str:
         """Get SAM2 config name from model filename."""
         config_map = {
+            # SAM2 original checkpoints
             "sam2_hiera_tiny.pt": "sam2_hiera_t.yaml",
             "sam2_hiera_small.pt": "sam2_hiera_s.yaml",
             "sam2_hiera_base_plus.pt": "sam2_hiera_b+.yaml",
             "sam2_hiera_large.pt": "sam2_hiera_l.yaml",
+            # SAM2.1 checkpoints (compatible with sam2 package 1.1.0+)
+            # Config path needs to include subdirectory
+            "sam2.1_hiera_tiny.pt": "configs/sam2.1/sam2.1_hiera_t.yaml",
+            "sam2.1_hiera_small.pt": "configs/sam2.1/sam2.1_hiera_s.yaml",
+            "sam2.1_hiera_base_plus.pt": "configs/sam2.1/sam2.1_hiera_b+.yaml",
+            "sam2.1_hiera_large.pt": "configs/sam2.1/sam2.1_hiera_l.yaml",
         }
-        return config_map.get(model_name, "sam2_hiera_s.yaml")
+        return config_map.get(model_name, "configs/sam2.1/sam2.1_hiera_s.yaml")
 
     def segment_image(
         self,

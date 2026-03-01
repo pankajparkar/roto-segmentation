@@ -49,7 +49,7 @@ class Settings(BaseSettings):
 
     # AI Models
     MODEL_PATH: str = "./models"
-    SAM2_MODEL: str = "sam2_hiera_base_plus.pt"  # base+ model - better quality
+    SAM2_MODEL: str = "sam2.1_hiera_small.pt"  # SAM2.1 small - compatible with sam2 1.1.0+
     DEVICE: str = get_default_device()  # Auto-detect: mps (M1), cuda, or cpu
 
     # Celery

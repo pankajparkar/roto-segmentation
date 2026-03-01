@@ -19,6 +19,7 @@ from roto_seg.services.mask_to_bezier import (
 )
 from roto_seg.services.video import get_reader, VideoInfo
 from roto_seg.exporters.fxs_exporter import FXSExporter
+from roto_seg.exporters.exr_exporter import EXRExporter
 
 
 @dataclass
@@ -114,6 +115,9 @@ class RotoPipeline:
             reader = get_reader(video_path)
             video_info = reader.info
 
+            # Debug: Log video dimensions
+            print(f"[DEBUG] Video Info: width={video_info.width}, height={video_info.height}, frames={video_info.frame_count}, fps={video_info.fps}")
+
             if progress_callback:
                 progress_callback(0, video_info.frame_count, "Loading video...")
 
@@ -143,20 +147,7 @@ class RotoPipeline:
                     errors=errors,
                 )
 
-            # Convert masks to shapes
-            if progress_callback:
-                progress_callback(
-                    video_info.frame_count - 1,
-                    video_info.frame_count,
-                    "Converting to shapes..."
-                )
-
-            shapes_by_frame = self._masks_to_shapes(all_masks, prompts)
-
-            # Optimize keyframes
-            shapes_by_frame = optimize_keyframes(shapes_by_frame)
-
-            # Export
+            # Export based on format
             if progress_callback:
                 progress_callback(
                     video_info.frame_count,
@@ -164,22 +155,54 @@ class RotoPipeline:
                     "Exporting..."
                 )
 
-            output_file = self._export(
-                shapes_by_frame,
-                output_path,
-                output_format,
-                video_info,
-            )
+            # For EXR export, use raw masks directly
+            if output_format == "exr":
+                output_file = self._export_exr(
+                    all_masks,
+                    output_path,
+                    video_info,
+                    prompts,
+                )
+                # Count frames from masks
+                frame_count = sum(len(masks) for masks in all_masks.values())
 
-            return PipelineResult(
-                success=True,
-                message=f"Exported {len(prompts)} objects to {output_file}",
-                output_path=output_file,
-                frame_count=len(shapes_by_frame),
-                object_count=len(prompts),
-                video_info=video_info,
-                errors=errors,
-            )
+                return PipelineResult(
+                    success=True,
+                    message=f"Exported {len(prompts)} objects to {output_file}",
+                    output_path=output_file,
+                    frame_count=frame_count,
+                    object_count=len(prompts),
+                    video_info=video_info,
+                    errors=errors,
+                )
+            else:
+                # Convert masks to shapes for vector formats
+                if progress_callback:
+                    progress_callback(
+                        video_info.frame_count - 1,
+                        video_info.frame_count,
+                        "Converting to shapes..."
+                    )
+
+                shapes_by_frame = self._masks_to_shapes(all_masks, prompts)
+                shapes_by_frame = optimize_keyframes(shapes_by_frame)
+
+                output_file = self._export(
+                    shapes_by_frame,
+                    output_path,
+                    output_format,
+                    video_info,
+                )
+
+                return PipelineResult(
+                    success=True,
+                    message=f"Exported {len(prompts)} objects to {output_file}",
+                    output_path=output_file,
+                    frame_count=len(shapes_by_frame),
+                    object_count=len(prompts),
+                    video_info=video_info,
+                    errors=errors,
+                )
 
         except Exception as e:
             return PipelineResult(
@@ -206,6 +229,17 @@ class RotoPipeline:
         initial_frame = reader.read_frame(prompt.frame_idx)
         if initial_frame is None:
             raise ValueError(f"Could not read frame {prompt.frame_idx}")
+
+        # Debug: Log frame dimensions and click point
+        frame_h, frame_w = initial_frame.shape[:2]
+        print(f"[DEBUG] Frame {prompt.frame_idx}: shape=({frame_w}x{frame_h}), click_point={prompt.points}, labels={prompt.point_labels}")
+
+        # Validate click point is within frame bounds
+        if prompt.points is not None:
+            for pt in prompt.points:
+                px, py = pt[0], pt[1]
+                if px < 0 or px >= frame_w or py < 0 or py >= frame_h:
+                    print(f"[WARNING] Click point ({px}, {py}) is outside frame bounds ({frame_w}x{frame_h})")
 
         # Segment initial frame
         mask_result, scores, _ = self.segmentation_service.segment_image(
@@ -356,8 +390,49 @@ class RotoPipeline:
             )
             return exporter.export(shapes_by_frame, output_path)
 
-        # TODO: Add more exporters (Nuke, PNG, etc.)
         raise ValueError(f"Unsupported output format: {output_format}")
+
+    def _export_exr(
+        self,
+        all_masks: Dict[int, Dict[int, np.ndarray]],
+        output_path: str,
+        video_info: VideoInfo,
+        prompts: List[SegmentationPrompt],
+    ) -> str:
+        """Export masks as EXR sequence."""
+        output_dir = Path(output_path)
+        if output_dir.suffix:
+            # If a file path was given, use its parent dir
+            output_dir = output_dir.parent / output_dir.stem
+
+        # Combine all object masks into single matte per frame
+        combined_masks: Dict[int, np.ndarray] = {}
+
+        for object_id, masks in all_masks.items():
+            for frame_idx, mask in masks.items():
+                if frame_idx not in combined_masks:
+                    combined_masks[frame_idx] = mask.astype(np.float32)
+                else:
+                    # Combine masks (max for overlapping regions)
+                    combined_masks[frame_idx] = np.maximum(
+                        combined_masks[frame_idx],
+                        mask.astype(np.float32)
+                    )
+
+        # Get label for filename
+        label = prompts[0].label if prompts else "Matte"
+
+        exporter = EXRExporter(
+            output_dir=str(output_dir),
+            prefix=label,
+            start_frame=min(combined_masks.keys()) if combined_masks else 1001,
+        )
+
+        return exporter.export_masks(
+            combined_masks,
+            width=video_info.width,
+            height=video_info.height,
+        )
 
 
 def quick_roto(

@@ -13,7 +13,11 @@ from roto_seg.services.video import (
     VideoInfo,
     get_reader,
 )
-from roto_seg.services.roto_pipeline import RotoPipeline
+
+# Lazy import to avoid circular dependency
+def get_roto_pipeline():
+    from roto_seg.services.roto_pipeline import RotoPipeline
+    return RotoPipeline
 
 __all__ = [
     "MaskToBezierConverter",
@@ -25,5 +29,5 @@ __all__ = [
     "ImageSequenceReader",
     "VideoInfo",
     "get_reader",
-    "RotoPipeline",
+    "get_roto_pipeline",
 ]

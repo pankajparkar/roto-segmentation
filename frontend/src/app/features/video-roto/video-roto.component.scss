@@ -61,6 +61,17 @@
     color: #1e40af;
     font-size: 0.875rem;
   }
+
+  &.select-mode {
+    background: #fef3c7;
+    border-color: #f59e0b;
+
+    p {
+      color: #92400e;
+      font-size: 1rem;
+      text-align: center;
+    }
+  }
 }
 
 .video-container {
@@ -68,25 +79,98 @@
   border-radius: 0.75rem;
   padding: 1.5rem;
   margin-bottom: 1.5rem;
-}
-
-.video-wrapper {
-  position: relative;
-  display: inline-block;
-  max-width: 100%;
 
   video {
-    max-width: 100%;
+    display: block;
+    width: 100%;
+    max-width: 900px;
     max-height: 500px;
+    margin: 0 auto;
     border-radius: 0.5rem;
-    cursor: crosshair;
+    cursor: pointer;
+
+    // Ensure controls are clickable
+    &::-webkit-media-controls {
+      z-index: 10;
+    }
   }
 
-  .canvas-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    pointer-events: none;
+  .video-controls {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 1.5rem;
+    gap: 0.75rem;
+    padding: 1rem;
+    background: #1f2937;
+    border-radius: 0.5rem;
+  }
+}
+
+.frame-container {
+  background: #111827;
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  text-align: center;
+
+  .frame-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+
+    .frame-info {
+      color: #9ca3af;
+      font-size: 0.875rem;
+      font-family: monospace;
+    }
+  }
+
+  .frame-wrapper {
+    position: relative;
+    display: inline-block;
+
+    .frame-canvas {
+      display: block;
+      border-radius: 0.5rem;
+      cursor: crosshair;
+      border: 2px solid #374151;
+    }
+
+    .overlay-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      pointer-events: none;
+      border-radius: 0.5rem;
+    }
+
+    .preview-loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.25rem;
+      background: rgba(0, 0, 0, 0.8);
+      border-radius: 2rem;
+      color: #22c55e;
+      font-size: 0.875rem;
+      font-weight: 500;
+
+      .spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid transparent;
+        border-top-color: #22c55e;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+    }
   }
 }
 
@@ -113,6 +197,19 @@
 
     .separator {
       color: #4b5563;
+    }
+
+    .preview-ready {
+      color: #22c55e;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+
+      &::before {
+        content: '✓';
+        font-size: 0.75rem;
+      }
     }
   }
 }

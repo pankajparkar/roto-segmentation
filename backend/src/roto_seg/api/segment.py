@@ -202,6 +202,13 @@ async def quick_roto(
             -F "frame_idx=0" \
             -F "label=person"
     """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Debug log the received coordinates
+    logger.info(f"Quick Roto Request: click_x={click_x}, click_y={click_y}, frame_idx={frame_idx}, label={label}, format={output_format}")
+    print(f"[DEBUG] Quick Roto: click=({click_x}, {click_y}), frame={frame_idx}, label={label}, format={output_format}")
+
     from roto_seg.services.roto_pipeline import RotoPipeline, SegmentationPrompt
 
     # Save uploaded video to temp file
@@ -212,9 +219,16 @@ async def quick_roto(
         with open(video_path, 'wb') as f:
             shutil.copyfileobj(video.file, f)
 
-        # Determine output path
-        output_ext = ".fxs" if output_format == "silhouette" else ".nk"
-        output_path = temp_dir / f"output{output_ext}"
+        # Determine output path based on format
+        if output_format == "silhouette":
+            output_ext = ".fxs"
+            output_path = temp_dir / f"output{output_ext}"
+        elif output_format == "exr":
+            output_ext = ".exr"
+            output_path = temp_dir / "exr_output"  # Directory for EXR sequence
+        else:
+            output_ext = ".nk"
+            output_path = temp_dir / f"output{output_ext}"
 
         # Run pipeline
         pipeline = RotoPipeline()
@@ -238,7 +252,26 @@ async def quick_roto(
                 detail=f"Pipeline failed: {result.message}"
             )
 
-        # Return the output file
+        # For EXR format, zip the output directory
+        if output_format == "exr":
+            import zipfile
+            zip_path = temp_dir / f"{label}_exr.zip"
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                exr_dir = Path(result.output_path)
+                for exr_file in exr_dir.glob("*.exr"):
+                    zf.write(exr_file, exr_file.name)
+
+            return FileResponse(
+                str(zip_path),
+                media_type="application/zip",
+                filename=f"{label}_exr.zip",
+                headers={
+                    "X-Frame-Count": str(result.frame_count),
+                    "X-Object-Count": str(result.object_count),
+                }
+            )
+
+        # Return the output file (FXS or NK)
         return FileResponse(
             result.output_path,
             media_type="application/octet-stream",
