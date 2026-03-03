@@ -55,20 +55,28 @@ class DeviceInfoResponse(BaseModel):
     recommended_device: str
     mps_available: bool
     cuda_available: bool
+    active_model: str
+    sam2_available: bool
+    sam2_enabled: bool
 
 
 @router.get("/device-info", response_model=DeviceInfoResponse)
 async def get_device_info():
     """Get information about available compute devices."""
     from roto_seg.ai.device import get_device_info
+    from roto_seg.ai.segmentation import get_segmentation_service
 
     info = get_device_info()
+    seg_info = get_segmentation_service().get_runtime_info()
     return DeviceInfoResponse(
         platform=info["platform"],
         torch_version=info["torch_version"],
         recommended_device=info["recommended"],
         mps_available=info["devices"]["mps"]["available"],
         cuda_available=info["devices"]["cuda"]["available"],
+        active_model=seg_info["model_name"],
+        sam2_available=seg_info["sam2_available"],
+        sam2_enabled=seg_info["use_sam2"],
     )
 
 
@@ -225,6 +233,7 @@ async def quick_roto(
     frame_idx: int = Form(0),
     label: str = Form("object"),
     output_format: str = Form("silhouette"),
+    propagation_mode: str = Form("auto"),
 ):
     """
     Quick rotoscoping with a single click or bounding box.
@@ -289,6 +298,7 @@ async def quick_roto(
         logger.info(f"Quick Roto Request: click_x={click_x}, click_y={click_y}, frame_idx={frame_idx}, label={label}, format={output_format}")
         print(f"[DEBUG] Quick Roto: click=({click_x}, {click_y}), frame={frame_idx}, label={label}, format={output_format}")
 
+    from roto_seg.ai.segmentation import get_segmentation_service
     from roto_seg.services.roto_pipeline import RotoPipeline, SegmentationPrompt
 
     # Save uploaded video to temp file
@@ -312,6 +322,13 @@ async def quick_roto(
 
         # Run pipeline
         pipeline = RotoPipeline()
+        seg_runtime = get_segmentation_service().get_runtime_info()
+        print(
+            "[DEBUG] Quick Roto Runtime:",
+            f"model={seg_runtime['model_name']}, use_sam2={seg_runtime['use_sam2']}, "
+            f"sam2_available={seg_runtime['sam2_available']}, device={seg_runtime['device']}, "
+            f"propagation_mode={propagation_mode}"
+        )
 
         # Create prompt based on selection mode
         if has_box:
@@ -333,6 +350,7 @@ async def quick_roto(
             prompts=[prompt],
             output_path=str(output_path),
             output_format=output_format,
+            propagation_mode=propagation_mode,
         )
 
         if not result.success:
@@ -357,6 +375,8 @@ async def quick_roto(
                 headers={
                     "X-Frame-Count": str(result.frame_count),
                     "X-Object-Count": str(result.object_count),
+                    "X-Propagation-Mode": result.propagation_mode,
+                    "X-Active-Model": seg_runtime["model_name"],
                 }
             )
 
@@ -368,9 +388,13 @@ async def quick_roto(
             headers={
                 "X-Frame-Count": str(result.frame_count),
                 "X-Object-Count": str(result.object_count),
+                "X-Propagation-Mode": result.propagation_mode,
+                "X-Active-Model": seg_runtime["model_name"],
             }
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,

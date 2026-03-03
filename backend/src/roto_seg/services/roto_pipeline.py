@@ -41,6 +41,7 @@ class PipelineResult:
     output_path: Optional[str] = None
     frame_count: int = 0
     object_count: int = 0
+    propagation_mode: str = "legacy"
     video_info: Optional[VideoInfo] = None
     errors: List[str] = field(default_factory=list)
 
@@ -92,6 +93,7 @@ class RotoPipeline:
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
         frame_step: int = 1,
         propagate: bool = True,
+        propagation_mode: str = "auto",
     ) -> PipelineResult:
         """
         Process video with AI segmentation and export results.
@@ -123,6 +125,12 @@ class RotoPipeline:
 
             # Process each object
             all_masks: Dict[int, Dict[int, np.ndarray]] = {}  # object_id -> {frame -> mask}
+            resolved_mode = self._resolve_propagation_mode(propagate, propagation_mode)
+            print(
+                "[DEBUG] Propagation mode resolved:",
+                f"requested={propagation_mode}, resolved={resolved_mode}, "
+                f"sam2_video_available={self.segmentation_service.is_video_propagation_available()}",
+            )
 
             for prompt in prompts:
                 if progress_callback:
@@ -133,8 +141,8 @@ class RotoPipeline:
 
                 try:
                     masks = self._segment_object(
-                        reader, prompt, video_info,
-                        propagate, frame_step, progress_callback
+                        video_path, reader, prompt, video_info,
+                        propagate, frame_step, progress_callback, resolved_mode
                     )
                     all_masks[prompt.object_id] = masks
                 except Exception as e:
@@ -172,6 +180,7 @@ class RotoPipeline:
                     output_path=output_file,
                     frame_count=frame_count,
                     object_count=len(prompts),
+                    propagation_mode=resolved_mode,
                     video_info=video_info,
                     errors=errors,
                 )
@@ -200,6 +209,7 @@ class RotoPipeline:
                     output_path=output_file,
                     frame_count=len(shapes_by_frame),
                     object_count=len(prompts),
+                    propagation_mode=resolved_mode,
                     video_info=video_info,
                     errors=errors,
                 )
@@ -215,14 +225,36 @@ class RotoPipeline:
 
     def _segment_object(
         self,
+        video_path: str,
         reader: Union["VideoReader", "ImageSequenceReader"],
         prompt: SegmentationPrompt,
         video_info: VideoInfo,
         propagate: bool,
         frame_step: int,
         progress_callback: Optional[Callable],
+        propagation_mode: str,
     ) -> Dict[int, np.ndarray]:
         """Segment a single object through video."""
+        if propagate and propagation_mode == "sam2_video":
+            try:
+                masks = self.segmentation_service.segment_video_with_prompt(
+                    video_path=video_path,
+                    initial_frame_idx=prompt.frame_idx,
+                    initial_points=prompt.points,
+                    initial_labels=prompt.point_labels,
+                    initial_box=prompt.box,
+                    object_id=prompt.object_id,
+                )
+                if frame_step > 1:
+                    masks = {
+                        idx: mask
+                        for idx, mask in masks.items()
+                        if idx == prompt.frame_idx or idx % frame_step == 0
+                    }
+                return {idx: self._post_process_mask(mask) for idx, mask in masks.items()}
+            except Exception as e:
+                raise RuntimeError(f"SAM2 video propagation failed: {e}") from e
+
         masks = {}
 
         # Get the initial frame
@@ -255,7 +287,7 @@ class RotoPipeline:
 
         # Use best mask
         best_idx = scores.argmax()
-        initial_mask = mask_result[best_idx]
+        initial_mask = self._post_process_mask(mask_result[best_idx])
         masks[prompt.frame_idx] = initial_mask
 
         if not propagate:
@@ -290,8 +322,9 @@ class RotoPipeline:
                     multimask_output=True,
                 )
                 best_idx = scores.argmax()
-                masks[frame_idx] = mask_result[best_idx]
-                prev_mask = mask_result[best_idx]
+                current_mask = self._post_process_mask(mask_result[best_idx])
+                masks[frame_idx] = current_mask
+                prev_mask = current_mask
             else:
                 # Lost the object
                 break
@@ -319,12 +352,62 @@ class RotoPipeline:
                     multimask_output=True,
                 )
                 best_idx = scores.argmax()
-                masks[frame_idx] = mask_result[best_idx]
-                prev_mask = mask_result[best_idx]
+                current_mask = self._post_process_mask(mask_result[best_idx])
+                masks[frame_idx] = current_mask
+                prev_mask = current_mask
             else:
                 break
 
         return masks
+
+    def _resolve_propagation_mode(self, propagate: bool, propagation_mode: str) -> str:
+        """Resolve requested propagation mode to an executable mode."""
+        if not propagate:
+            return "single_frame"
+
+        requested = propagation_mode.lower().strip()
+        if requested not in {"auto", "sam2_video", "legacy"}:
+            raise ValueError(f"Unsupported propagation_mode: {propagation_mode}")
+
+        if requested == "legacy":
+            return "legacy"
+
+        if self.segmentation_service.is_video_propagation_available():
+            return "sam2_video"
+
+        if requested == "sam2_video":
+            raise RuntimeError(
+                "propagation_mode=sam2_video requested but SAM2 video predictor is unavailable"
+            )
+
+        return "legacy"
+
+    def _post_process_mask(self, mask: np.ndarray) -> np.ndarray:
+        """
+        Lightweight cleanup to stabilize temporal results.
+        """
+        import cv2
+
+        mask_u8 = (mask > 0).astype(np.uint8)
+        if mask_u8.size == 0:
+            return mask_u8
+
+        # Remove tiny disconnected components.
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask_u8, 8)
+        min_area = max(64, int(mask_u8.shape[0] * mask_u8.shape[1] * 0.0001))
+        cleaned = np.zeros_like(mask_u8)
+        for label_idx in range(1, num_labels):
+            if stats[label_idx, cv2.CC_STAT_AREA] >= min_area:
+                cleaned[labels == label_idx] = 1
+
+        # Fill internal holes.
+        h, w = cleaned.shape
+        flood = cleaned.copy()
+        flood_mask = np.zeros((h + 2, w + 2), np.uint8)
+        cv2.floodFill(flood, flood_mask, (0, 0), 1)
+        holes = (1 - flood) & (1 - cleaned)
+        filled = cleaned | holes
+        return filled.astype(np.uint8)
 
     def _get_mask_center(self, mask: np.ndarray) -> Optional[np.ndarray]:
         """Get center point of mask for propagation."""

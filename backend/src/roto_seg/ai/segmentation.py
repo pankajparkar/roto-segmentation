@@ -8,8 +8,9 @@ This module provides the core segmentation functionality:
 """
 
 import gc
+import tempfile
 from pathlib import Path
-from typing import Optional, Union, Tuple, List
+from typing import Optional, Union, Tuple, List, Dict
 import numpy as np
 
 try:
@@ -68,7 +69,10 @@ class SegmentationService:
         self._model_loaded = False
 
         print(f"SegmentationService initialized on device: {self.device}")
-        print(f"SAM2 available: {SAM2_AVAILABLE}, using SAM2: {self.use_sam2}")
+        print(
+            f"SAM2 available: {SAM2_AVAILABLE}, using SAM2: {self.use_sam2}, "
+            f"model={settings.SAM2_MODEL}"
+        )
 
     def load_model(self):
         """Load the segmentation model into memory."""
@@ -83,6 +87,8 @@ class SegmentationService:
         try:
             checkpoint_path = Path(self.model_path) / settings.SAM2_MODEL
             config_name = self._get_config_name(settings.SAM2_MODEL)
+            if not checkpoint_path.exists():
+                raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
             print(f"Loading SAM2 model: {checkpoint_path}")
             print(f"Config: {config_name}")
@@ -103,6 +109,35 @@ class SegmentationService:
             print("Falling back to basic segmentation")
             self.use_sam2 = False
             self._model_loaded = True
+
+    def _ensure_video_predictor(self):
+        """Build video predictor lazily."""
+        if self._video_predictor is not None:
+            return
+        checkpoint_path = Path(self.model_path) / settings.SAM2_MODEL
+        config_name = self._get_config_name(settings.SAM2_MODEL)
+        self._video_predictor = build_sam2_video_predictor(
+            config_name,
+            str(checkpoint_path),
+            device=self.device,
+        )
+
+    def is_video_propagation_available(self) -> bool:
+        """Return whether SAM2 video propagation can be used."""
+        return bool(self.use_sam2 and SAM2_AVAILABLE)
+
+    def get_runtime_info(self) -> dict:
+        """Return runtime diagnostics for debugging model loading."""
+        checkpoint_path = Path(self.model_path) / settings.SAM2_MODEL
+        return {
+            "sam2_available": SAM2_AVAILABLE,
+            "use_sam2": self.use_sam2,
+            "device": str(self.device),
+            "model_name": settings.SAM2_MODEL,
+            "model_path": str(checkpoint_path),
+            "model_exists": checkpoint_path.exists(),
+            "video_predictor_ready": self._video_predictor is not None,
+        }
 
     def _get_config_name(self, model_name: str) -> str:
         """Get SAM2 config name from model filename."""
@@ -255,50 +290,139 @@ class SegmentationService:
         Yields:
             Tuple of (frame_idx, mask) for each frame
         """
-        if not self.use_sam2:
+        masks = self.segment_video_with_prompt(
+            video_path=video_path,
+            initial_frame_idx=initial_frame_idx,
+            initial_points=initial_points,
+            initial_labels=initial_labels,
+            object_id=object_id,
+        )
+        for frame_idx, mask in sorted(masks.items()):
+            yield frame_idx, mask
+
+    def segment_video_with_prompt(
+        self,
+        video_path: str,
+        initial_frame_idx: int,
+        initial_points: Optional[np.ndarray] = None,
+        initial_labels: Optional[np.ndarray] = None,
+        initial_box: Optional[np.ndarray] = None,
+        object_id: int = 1,
+    ) -> Dict[int, np.ndarray]:
+        """
+        Segment and propagate masks through video with SAM2 video predictor.
+        """
+        if not self.is_video_propagation_available():
             raise NotImplementedError(
-                "Video segmentation requires SAM2. "
-                "Install with: pip install segment-anything-2"
+                "Video segmentation requires SAM2 package and model availability."
             )
 
         self.load_model()
+        self._ensure_video_predictor()
 
-        # Build video predictor if not already done
-        if self._video_predictor is None:
-            checkpoint_path = Path(self.model_path) / settings.SAM2_MODEL
-            config_name = self._get_config_name(settings.SAM2_MODEL)
-            self._video_predictor = build_sam2_video_predictor(
-                config_name,
-                str(checkpoint_path),
+        temp_frames_dir: Optional[tempfile.TemporaryDirectory] = None
+        try:
+            try:
+                inference_state = self._video_predictor.init_state(video_path=video_path)
+            except Exception as init_err:
+                print(
+                    "[WARN] SAM2 init_state failed on source video; "
+                    "falling back to extracted JPG sequence:",
+                    init_err,
+                )
+                temp_frames_dir = tempfile.TemporaryDirectory(prefix="sam2_frames_")
+                frames_dir = self._extract_video_to_jpg_sequence(
+                    video_path,
+                    Path(temp_frames_dir.name),
+                )
+                inference_state = self._video_predictor.init_state(
+                    video_path=str(frames_dir)
+                )
+
+            if initial_points is None and initial_box is None:
+                raise ValueError("Must provide either initial_points or initial_box")
+
+            if initial_labels is None and initial_points is not None:
+                initial_labels = np.ones(len(initial_points), dtype=np.int32)
+
+            # API supports adding points and/or box in the same call.
+            self._video_predictor.add_new_points_or_box(
+                inference_state=inference_state,
+                frame_idx=initial_frame_idx,
+                obj_id=object_id,
+                points=initial_points,
+                labels=initial_labels,
+                box=initial_box,
             )
 
-        # Initialize video state
-        inference_state = self._video_predictor.init_state(video_path=video_path)
+            masks_by_frame: Dict[int, np.ndarray] = {}
 
-        # Add initial prompts
-        self._video_predictor.add_new_points(
-            inference_state=inference_state,
-            frame_idx=initial_frame_idx,
-            obj_id=object_id,
-            points=initial_points,
-            labels=initial_labels,
-        )
+            for frame_idx, obj_ids, mask_logits in self._video_predictor.propagate_in_video(
+                inference_state
+            ):
+                obj_index = None
+                for idx, candidate_obj_id in enumerate(obj_ids):
+                    if int(candidate_obj_id) == object_id:
+                        obj_index = idx
+                        break
 
-        # Propagate through video
-        for frame_idx, obj_ids, masks in self._video_predictor.propagate_in_video(
-            inference_state
-        ):
-            if object_id in masks:
-                yield frame_idx, masks[object_id].cpu().numpy()
+                if obj_index is None:
+                    continue
 
-            # Periodic memory cleanup
-            if frame_idx % 50 == 0:
-                clear_memory(self.device)
-                gc.collect()
+                # Convert logits -> binary mask for export pipeline.
+                obj_logits = mask_logits[obj_index]
+                if hasattr(obj_logits, "detach"):
+                    obj_mask = (obj_logits.detach().cpu().numpy() > 0).astype(np.uint8)
+                else:
+                    obj_mask = (np.asarray(obj_logits) > 0).astype(np.uint8)
 
-        # Final cleanup
-        clear_memory(self.device)
-        gc.collect()
+                # Some predictor outputs include a singleton channel dimension.
+                if obj_mask.ndim == 3 and obj_mask.shape[0] == 1:
+                    obj_mask = obj_mask[0]
+                elif obj_mask.ndim == 3 and obj_mask.shape[-1] == 1:
+                    obj_mask = obj_mask[:, :, 0]
+
+                masks_by_frame[int(frame_idx)] = obj_mask
+
+                if frame_idx % 50 == 0:
+                    clear_memory(self.device)
+                    gc.collect()
+
+            clear_memory(self.device)
+            gc.collect()
+            return masks_by_frame
+        finally:
+            if temp_frames_dir is not None:
+                temp_frames_dir.cleanup()
+
+    def _extract_video_to_jpg_sequence(self, video_path: str, out_dir: Path) -> Path:
+        """
+        Extract input video to numbered JPG frames for SAM2 folder mode.
+        """
+        import cv2
+
+        out_dir.mkdir(parents=True, exist_ok=True)
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise RuntimeError(f"Could not open video for frame extraction: {video_path}")
+
+        frame_idx = 0
+        try:
+            while True:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                frame_path = out_dir / f"{frame_idx:06d}.jpg"
+                if not cv2.imwrite(str(frame_path), frame):
+                    raise RuntimeError(f"Failed writing frame: {frame_path}")
+                frame_idx += 1
+        finally:
+            cap.release()
+
+        if frame_idx == 0:
+            raise RuntimeError("No frames extracted from input video")
+        print(f"[DEBUG] Extracted {frame_idx} frames for SAM2 video predictor")
+        return out_dir
 
     def unload_model(self):
         """Unload model to free memory."""

@@ -2,6 +2,7 @@ import { Component, inject, signal, viewChild, ElementRef } from '@angular/core'
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/services/api.service';
+import { BoxPrompt } from '../../core/models/api.models';
 
 @Component({
   selector: 'app-video-roto',
@@ -434,13 +435,13 @@ export class VideoRotoComponent {
       const blob = await response.blob();
       const file = new File([blob], 'frame.jpg', { type: 'image/jpeg' });
 
-      // Create box coordinates [x1, y1, x2, y2]
-      const box = [
-        Math.min(start.x, end.x),
-        Math.min(start.y, end.y),
-        Math.max(start.x, end.x),
-        Math.max(start.y, end.y)
-      ];
+      // Create box prompt in API contract shape
+      const box: BoxPrompt = {
+        x1: Math.min(start.x, end.x),
+        y1: Math.min(start.y, end.y),
+        x2: Math.max(start.x, end.x),
+        y2: Math.max(start.y, end.y)
+      };
 
       console.log('Requesting segmentation with box:', box);
 
