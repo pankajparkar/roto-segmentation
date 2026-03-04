@@ -1,0 +1,266 @@
+.converter-container {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.page-header {
+  margin-bottom: 2rem;
+
+  .back-link {
+    display: inline-block;
+    color: #6b7280;
+    text-decoration: none;
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+
+    &:hover {
+      color: #3b82f6;
+    }
+  }
+
+  h1 {
+    font-size: 1.75rem;
+    font-weight: 600;
+    color: #111827;
+    margin: 0 0 0.5rem;
+  }
+
+  p {
+    color: #6b7280;
+    margin: 0;
+  }
+}
+
+.converter-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.drop-zone {
+  border: 2px dashed #d1d5db;
+  border-radius: 12px;
+  padding: 2.5rem;
+  text-align: center;
+  transition: all 0.2s ease;
+  background: #fafafa;
+
+  &.drag-over {
+    border-color: #3b82f6;
+    background: #eff6ff;
+  }
+
+  &.has-file {
+    border-style: solid;
+    border-color: #10b981;
+    background: #ecfdf5;
+  }
+}
+
+.drop-content {
+  .drop-icon {
+    color: #9ca3af;
+    margin-bottom: 1rem;
+  }
+
+  .drop-text {
+    font-size: 1rem;
+    color: #374151;
+    margin: 0 0 0.5rem;
+  }
+
+  .drop-subtext {
+    color: #9ca3af;
+    margin: 0 0 1rem;
+    font-size: 0.875rem;
+  }
+}
+
+.file-input {
+  display: none;
+}
+
+.file-input-label {
+  cursor: pointer;
+}
+
+.browse-btn {
+  display: inline-block;
+  padding: 0.625rem 1.25rem;
+  background: #3b82f6;
+  color: white;
+  border-radius: 8px;
+  font-weight: 500;
+  transition: background 0.2s;
+
+  &:hover {
+    background: #2563eb;
+  }
+}
+
+.file-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+
+  .file-icon {
+    color: #10b981;
+  }
+
+  .file-details {
+    flex: 1;
+    text-align: left;
+
+    .file-name {
+      display: block;
+      font-weight: 500;
+      color: #111827;
+      word-break: break-all;
+    }
+
+    .file-size {
+      font-size: 0.875rem;
+      color: #6b7280;
+    }
+  }
+
+  .clear-btn {
+    padding: 0.5rem;
+    background: none;
+    border: none;
+    color: #9ca3af;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.2s;
+
+    &:hover:not(:disabled) {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  }
+}
+
+.quality-section {
+  h3 {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #374151;
+    margin: 0 0 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+}
+
+.quality-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.quality-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    border-color: #3b82f6;
+  }
+
+  &.selected {
+    border-color: #3b82f6;
+    background: #eff6ff;
+  }
+
+  input[type="radio"] {
+    margin-top: 0.125rem;
+    accent-color: #3b82f6;
+  }
+
+  .option-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+
+  .option-label {
+    font-weight: 500;
+    color: #111827;
+  }
+
+  .option-desc {
+    font-size: 0.8125rem;
+    color: #6b7280;
+  }
+}
+
+.action-section {
+  margin-top: 0.5rem;
+}
+
+.convert-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1.5rem;
+  background: #10b981;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+
+  &:hover {
+    background: #059669;
+  }
+}
+
+.progress-container {
+  text-align: center;
+
+  .progress-bar {
+    height: 8px;
+    background: #e5e7eb;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 0.5rem;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6, #10b981);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+  }
+
+  .progress-text {
+    font-size: 0.875rem;
+    color: #6b7280;
+  }
+}
+
+.error-message {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  color: #dc2626;
+  font-size: 0.875rem;
+}

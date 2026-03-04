@@ -230,22 +230,37 @@ async def quick_roto(
     click_x: Optional[int] = Form(None),
     click_y: Optional[int] = Form(None),
     box: Optional[str] = Form(None),  # JSON: [x1, y1, x2, y2]
+    points: Optional[str] = Form(None),  # JSON: [[x, y, label], ...] for multiple annotations
     frame_idx: int = Form(0),
     label: str = Form("object"),
     output_format: str = Form("silhouette"),
     propagation_mode: str = Form("auto"),
+    matting: bool = Form(False),
+    matting_model: str = Form("vitmatte"),
+    temporal_smooth: float = Form(0.0),
 ):
     """
-    Quick rotoscoping with a single click or bounding box.
+    Quick rotoscoping with point annotations, single click, or bounding box.
 
-    Upload a video, click on an object OR draw a box, get an FXS file.
-    Supports both point selection and box selection for SAM2.
+    Upload a video, annotate the object (add/remove points), get an FXS file.
+    Supports multiple annotation points with labels for refinement.
+
+    Industry-standard controls:
+        - Click = Add to selection (label=1, foreground)
+        - Alt+Click = Remove from selection (label=0, background)
 
     This is a synchronous endpoint for small videos.
     For large videos, use the async job API.
 
     Examples:
-        # Point selection:
+        # Multiple annotation points (recommended):
+        curl -X POST "http://localhost:8000/api/v1/segment/quick-roto" \
+            -F "video=@clip.mp4" \
+            -F 'points=[[500, 300, 1], [600, 400, 1], [450, 250, 0]]' \
+            -F "frame_idx=0" \
+            -F "label=person"
+
+        # Single point selection (legacy):
         curl -X POST "http://localhost:8000/api/v1/segment/quick-roto" \
             -F "video=@clip.mp4" \
             -F "click_x=500" \
@@ -264,6 +279,24 @@ async def quick_roto(
     import json
     logger = logging.getLogger(__name__)
 
+    # Parse multiple annotation points if provided
+    annotation_points = None
+    annotation_labels = None
+    if points:
+        try:
+            points_data = json.loads(points)
+            annotation_points = np.array([[p[0], p[1]] for p in points_data])
+            annotation_labels = np.array([p[2] if len(p) > 2 else 1 for p in points_data])
+            print(f"[DEBUG] Parsed annotation points: {len(points_data)} points")
+            for i, p in enumerate(points_data):
+                action = "ADD" if (p[2] if len(p) > 2 else 1) == 1 else "REMOVE"
+                print(f"[DEBUG]   Point {i+1}: ({p[0]}, {p[1]}) - {action}")
+        except (json.JSONDecodeError, IndexError) as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid points format. Expected [[x, y, label], ...]: {e}"
+            )
+
     # Parse box if provided
     box_coords = None
     if box:
@@ -280,18 +313,29 @@ async def quick_roto(
                 detail=f"Invalid box format. Expected JSON array [x1, y1, x2, y2]: {e}"
             )
 
-    # Validate we have either point or box
+    # Validate we have at least one selection method
+    has_annotations = annotation_points is not None and len(annotation_points) > 0
     has_point = click_x is not None and click_y is not None
     has_box = box_coords is not None
 
-    if not has_point and not has_box:
+    if not has_annotations and not has_point and not has_box:
         raise HTTPException(
             status_code=400,
-            detail="Must provide either click coordinates (click_x, click_y) or box coordinates"
+            detail="Must provide annotation points, click coordinates (click_x, click_y), or box coordinates"
+        )
+    if temporal_smooth < 0 or temporal_smooth > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="temporal_smooth must be between 0.0 and 1.0"
         )
 
-    # Debug log the received coordinates
-    if has_box:
+    # Debug log the received selection
+    if has_annotations:
+        fg_count = int(np.sum(annotation_labels == 1))
+        bg_count = int(np.sum(annotation_labels == 0))
+        logger.info(f"Quick Roto Request: {len(annotation_points)} points ({fg_count} add, {bg_count} remove), frame_idx={frame_idx}, label={label}, format={output_format}")
+        print(f"[DEBUG] Quick Roto: {len(annotation_points)} annotation points ({fg_count} add, {bg_count} remove), frame={frame_idx}, label={label}, format={output_format}")
+    elif has_box:
         logger.info(f"Quick Roto Request: box={box_coords}, frame_idx={frame_idx}, label={label}, format={output_format}")
         print(f"[DEBUG] Quick Roto: box={box_coords}, frame={frame_idx}, label={label}, format={output_format}")
     else:
@@ -327,17 +371,27 @@ async def quick_roto(
             "[DEBUG] Quick Roto Runtime:",
             f"model={seg_runtime['model_name']}, use_sam2={seg_runtime['use_sam2']}, "
             f"sam2_available={seg_runtime['sam2_available']}, device={seg_runtime['device']}, "
-            f"propagation_mode={propagation_mode}"
+            f"propagation_mode={propagation_mode}, matting={matting}, "
+            f"matting_model={matting_model}, temporal_smooth={temporal_smooth}"
         )
 
-        # Create prompt based on selection mode
-        if has_box:
+        # Create prompt based on selection mode (priority: annotations > box > single click)
+        if has_annotations:
+            # Multiple annotation points with labels
+            prompt = SegmentationPrompt(
+                frame_idx=frame_idx,
+                points=annotation_points,
+                point_labels=annotation_labels,
+                label=label,
+            )
+        elif has_box:
             prompt = SegmentationPrompt(
                 frame_idx=frame_idx,
                 box=np.array(box_coords),
                 label=label,
             )
         else:
+            # Legacy single click
             prompt = SegmentationPrompt(
                 frame_idx=frame_idx,
                 points=np.array([[click_x, click_y]]),
@@ -351,6 +405,9 @@ async def quick_roto(
             output_path=str(output_path),
             output_format=output_format,
             propagation_mode=propagation_mode,
+            matting=matting,
+            matting_model=matting_model,
+            temporal_smooth=temporal_smooth,
         )
 
         if not result.success:
@@ -377,6 +434,8 @@ async def quick_roto(
                     "X-Object-Count": str(result.object_count),
                     "X-Propagation-Mode": result.propagation_mode,
                     "X-Active-Model": seg_runtime["model_name"],
+                    "X-Matting-Enabled": str(result.matting_enabled).lower(),
+                    "X-Matting-Model": result.matting_model,
                 }
             )
 
@@ -390,6 +449,8 @@ async def quick_roto(
                 "X-Object-Count": str(result.object_count),
                 "X-Propagation-Mode": result.propagation_mode,
                 "X-Active-Model": seg_runtime["model_name"],
+                "X-Matting-Enabled": str(result.matting_enabled).lower(),
+                "X-Matting-Model": result.matting_model,
             }
         )
 

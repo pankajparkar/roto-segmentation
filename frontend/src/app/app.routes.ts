@@ -14,6 +14,10 @@ export const routes: Routes = [
     loadComponent: () => import('./features/video-roto/video-roto.component').then(m => m.VideoRotoComponent)
   },
   {
+    path: 'convert',
+    loadComponent: () => import('./features/video-converter/video-converter.component').then(m => m.VideoConverterComponent)
+  },
+  {
     path: '**',
     redirectTo: ''
   }

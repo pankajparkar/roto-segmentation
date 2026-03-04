@@ -7,6 +7,7 @@ from roto_seg.services.mask_to_bezier import (
     mask_to_shapes,
     optimize_keyframes,
 )
+from roto_seg.services.matting import MattingRefiner, MattingOptions
 from roto_seg.services.video import (
     VideoReader,
     ImageSequenceReader,
@@ -25,6 +26,8 @@ __all__ = [
     "BezierShape",
     "mask_to_shapes",
     "optimize_keyframes",
+    "MattingRefiner",
+    "MattingOptions",
     "VideoReader",
     "ImageSequenceReader",
     "VideoInfo",

@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from roto_seg.api import health, projects, shots, exports, segment
+from roto_seg.api import health, projects, shots, exports, segment, convert
 from roto_seg.core.config import settings
 from roto_seg.ai.device import get_device_info
 
@@ -54,6 +54,7 @@ app.include_router(projects.router, prefix="/api/v1/projects", tags=["Projects"]
 app.include_router(shots.router, prefix="/api/v1/shots", tags=["Shots"])
 app.include_router(exports.router, prefix="/api/v1/exports", tags=["Exports"])
 app.include_router(segment.router, prefix="/api/v1/segment", tags=["Segmentation"])
+app.include_router(convert.router, prefix="/api/v1/convert", tags=["Convert"])
 
 
 @app.get("/")

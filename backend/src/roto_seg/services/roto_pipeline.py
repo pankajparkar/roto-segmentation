@@ -20,6 +20,7 @@ from roto_seg.services.mask_to_bezier import (
 from roto_seg.services.video import get_reader, VideoInfo
 from roto_seg.exporters.fxs_exporter import FXSExporter
 from roto_seg.exporters.exr_exporter import EXRExporter
+from roto_seg.services.matting import MattingRefiner, MattingOptions
 
 
 @dataclass
@@ -42,6 +43,8 @@ class PipelineResult:
     frame_count: int = 0
     object_count: int = 0
     propagation_mode: str = "legacy"
+    matting_enabled: bool = False
+    matting_model: str = "none"
     video_info: Optional[VideoInfo] = None
     errors: List[str] = field(default_factory=list)
 
@@ -94,6 +97,9 @@ class RotoPipeline:
         frame_step: int = 1,
         propagate: bool = True,
         propagation_mode: str = "auto",
+        matting: bool = False,
+        matting_model: str = "vitmatte",
+        temporal_smooth: float = 0.0,
     ) -> PipelineResult:
         """
         Process video with AI segmentation and export results.
@@ -155,6 +161,17 @@ class RotoPipeline:
                     errors=errors,
                 )
 
+            if matting:
+                print(
+                    "[DEBUG] Applying matting refinement:",
+                    f"model={matting_model}, temporal_smooth={temporal_smooth}",
+                )
+                all_masks = self._apply_matting(
+                    all_masks,
+                    matting_model=matting_model,
+                    temporal_smooth=temporal_smooth,
+                )
+
             # Export based on format
             if progress_callback:
                 progress_callback(
@@ -181,6 +198,8 @@ class RotoPipeline:
                     frame_count=frame_count,
                     object_count=len(prompts),
                     propagation_mode=resolved_mode,
+                    matting_enabled=matting,
+                    matting_model=matting_model if matting else "none",
                     video_info=video_info,
                     errors=errors,
                 )
@@ -210,6 +229,8 @@ class RotoPipeline:
                     frame_count=len(shapes_by_frame),
                     object_count=len(prompts),
                     propagation_mode=resolved_mode,
+                    matting_enabled=matting,
+                    matting_model=matting_model if matting else "none",
                     video_info=video_info,
                     errors=errors,
                 )
@@ -519,6 +540,24 @@ class RotoPipeline:
             width=video_info.width,
             height=video_info.height,
         )
+
+    def _apply_matting(
+        self,
+        all_masks: Dict[int, Dict[int, np.ndarray]],
+        matting_model: str,
+        temporal_smooth: float,
+    ) -> Dict[int, Dict[int, np.ndarray]]:
+        """Apply alpha refinement per object sequence."""
+        refined: Dict[int, Dict[int, np.ndarray]] = {}
+        for object_id, masks_by_frame in all_masks.items():
+            options = MattingOptions(
+                enabled=True,
+                model=matting_model,
+                temporal_smooth=float(np.clip(temporal_smooth, 0.0, 1.0)),
+            )
+            refiner = MattingRefiner(options)
+            refined[object_id] = refiner.refine_sequence(masks_by_frame)
+        return refined
 
 
 def quick_roto(

@@ -1,0 +1,131 @@
+<div class="converter-container">
+  <header class="page-header">
+    <a routerLink="/" class="back-link">&larr; Back</a>
+    <h1>MOV to MP4 Converter</h1>
+    <p>Convert your MOV files to MP4 without quality loss</p>
+  </header>
+
+  <main class="converter-main">
+    <!-- Drop Zone -->
+    <div
+      class="drop-zone"
+      [class.drag-over]="isDragOver()"
+      [class.has-file]="selectedFile()"
+      (dragover)="onDragOver($event)"
+      (dragleave)="onDragLeave($event)"
+      (drop)="onDrop($event)"
+    >
+      @if (!selectedFile()) {
+        <div class="drop-content">
+          <div class="drop-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+          </div>
+          <p class="drop-text">Drag & drop your MOV file here</p>
+          <p class="drop-subtext">or</p>
+          <label class="file-input-label">
+            <input
+              type="file"
+              accept=".mov,.MOV"
+              (change)="onFileSelected($event)"
+              class="file-input"
+            />
+            <span class="browse-btn">Browse Files</span>
+          </label>
+        </div>
+      } @else {
+        <div class="file-info">
+          <div class="file-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <polygon points="23 7 16 12 23 17 23 7"/>
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+            </svg>
+          </div>
+          <div class="file-details">
+            <span class="file-name">{{ selectedFile()?.name }}</span>
+            <span class="file-size">{{ formatFileSize(selectedFile()?.size || 0) }}</span>
+          </div>
+          <button
+            type="button"
+            class="clear-btn"
+            (click)="clearFile()"
+            [disabled]="isConverting()"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+      }
+    </div>
+
+    <!-- Quality Options -->
+    @if (selectedFile()) {
+      <div class="quality-section">
+        <h3>Quality Preset</h3>
+        <div class="quality-options">
+          @for (option of qualityOptions; track option.value) {
+            <label
+              class="quality-option"
+              [class.selected]="quality() === option.value"
+            >
+              <input
+                type="radio"
+                name="quality"
+                [value]="option.value"
+                [checked]="quality() === option.value"
+                (change)="quality.set(option.value)"
+                [disabled]="isConverting()"
+              />
+              <span class="option-content">
+                <span class="option-label">{{ option.label }}</span>
+                <span class="option-desc">{{ option.description }}</span>
+              </span>
+            </label>
+          }
+        </div>
+      </div>
+
+      <!-- Convert Button -->
+      <div class="action-section">
+        @if (isConverting()) {
+          <div class="progress-container">
+            <div class="progress-bar">
+              <div class="progress-fill" [style.width.%]="progress()"></div>
+            </div>
+            <span class="progress-text">Converting... {{ progress() }}%</span>
+          </div>
+        } @else {
+          <button
+            type="button"
+            class="convert-btn"
+            (click)="convert()"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Convert & Download
+          </button>
+        }
+      </div>
+    }
+
+    <!-- Error Message -->
+    @if (error()) {
+      <div class="error-message">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        {{ error() }}
+      </div>
+    }
+  </main>
+</div>

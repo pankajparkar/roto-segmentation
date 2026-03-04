@@ -62,7 +62,8 @@ export class ApiService {
     frameIdx: number = 0,
     label: string = 'object',
     outputFormat: string = 'silhouette',
-    box?: [number, number, number, number]
+    box?: [number, number, number, number],
+    annotationPoints?: PointPrompt[]
   ): Observable<Blob> {
     const formData = new FormData();
     formData.append('video', video);
@@ -70,10 +71,17 @@ export class ApiService {
     formData.append('label', label);
     formData.append('output_format', outputFormat);
 
-    // Either point or box selection
-    if (box) {
+    // Multiple annotation points (new system)
+    if (annotationPoints && annotationPoints.length > 0) {
+      const pointsArray = annotationPoints.map(p => [p.x, p.y, p.label]);
+      formData.append('points', JSON.stringify(pointsArray));
+    }
+    // Box selection
+    else if (box) {
       formData.append('box', JSON.stringify(box));
-    } else if (clickX !== null && clickY !== null) {
+    }
+    // Legacy single point
+    else if (clickX !== null && clickY !== null) {
       formData.append('click_x', clickX.toString());
       formData.append('click_y', clickY.toString());
     }
@@ -88,5 +96,38 @@ export class ApiService {
    */
   healthCheck(): Observable<{ status: string }> {
     return this.http.get<{ status: string }>(`${this.baseUrl}/health`);
+  }
+
+  /**
+   * Convert MOV to MP4 without quality loss
+   * @param video The MOV file to convert
+   * @param quality Quality preset: 'lossless', 'high', 'medium'
+   * @returns Observable with the converted MP4 as Blob
+   */
+  convertMovToMp4(
+    video: File,
+    quality: 'lossless' | 'high' | 'medium' = 'high'
+  ): Observable<Blob> {
+    const formData = new FormData();
+    formData.append('video', video);
+    formData.append('quality', quality);
+
+    return this.http.post(`${this.baseUrl}/api/v1/convert/mov-to-mp4`, formData, {
+      responseType: 'blob'
+    });
+  }
+
+  /**
+   * Stream copy MOV to MP4 (fastest, no re-encoding)
+   * @param video The MOV file to convert
+   * @returns Observable with the converted MP4 as Blob
+   */
+  streamCopyToMp4(video: File): Observable<Blob> {
+    const formData = new FormData();
+    formData.append('video', video);
+
+    return this.http.post(`${this.baseUrl}/api/v1/convert/stream-copy`, formData, {
+      responseType: 'blob'
+    });
   }
 }

@@ -108,11 +108,61 @@
 
       <div class="instructions select-mode">
         @if (selectionMode() === 'point') {
-          <p><strong>Click on the object</strong> you want to track (e.g., the car)</p>
+          <div class="annotation-instructions">
+            <p><strong>Click to add</strong> areas to your selection</p>
+            <p><strong>Alt + Click</strong> to remove areas from selection</p>
+          </div>
         } @else {
           <p><strong>Draw a box</strong> around the object you want to track</p>
         }
       </div>
+
+      <!-- Annotation Toolbar (Point Mode Only) -->
+      @if (selectionMode() === 'point') {
+        <div class="annotation-toolbar">
+          <div class="annotation-status">
+            <span class="status-item add">
+              <span class="status-dot"></span>
+              Add: {{ getAnnotationCounts().add }}
+            </span>
+            <span class="status-item remove">
+              <span class="status-dot"></span>
+              Remove: {{ getAnnotationCounts().remove }}
+            </span>
+          </div>
+          <div class="annotation-hint" [class.alt-active]="isAltPressed()">
+            @if (isAltPressed()) {
+              <span class="hint-badge remove">Remove Mode (Alt held)</span>
+            } @else {
+              <span class="hint-badge add">Add Mode (hold Alt to remove)</span>
+            }
+          </div>
+          <div class="annotation-actions">
+            <button
+              class="btn btn-secondary btn-sm"
+              (click)="undoLastPoint()"
+              [disabled]="annotationPoints().length === 0"
+              title="Undo last point (Ctrl+Z)"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 7v6h6"/>
+                <path d="M21 17a9 9 0 00-9-9 9 9 0 00-6.16 2.41L3 13"/>
+              </svg>
+              Undo
+            </button>
+            <button
+              class="btn btn-secondary btn-sm"
+              (click)="clearAllPoints()"
+              [disabled]="annotationPoints().length === 0"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+              </svg>
+              Clear All
+            </button>
+          </div>
+        </div>
+      }
 
       <div class="frame-container">
         <div class="frame-header">
@@ -131,6 +181,7 @@
             class="frame-canvas"
             [class.box-mode]="selectionMode() === 'box'"
             (click)="onFrameClick($event)"
+            (contextmenu)="onFrameContextMenu($event)"
             (mousedown)="onFrameMouseDown($event)"
             (mousemove)="onFrameMouseMove($event)"
             (mouseup)="onFrameMouseUp($event)"
@@ -153,8 +204,16 @@
           <div class="click-info">
             <div class="click-details">
               @if (selectionMode() === 'point') {
-                <span class="label">Selected Point:</span>
-                <span class="value">X: {{ clickX() }}, Y: {{ clickY() }}</span>
+                @if (annotationPoints().length > 0) {
+                  <span class="label">Annotations:</span>
+                  <span class="value annotation-count">
+                    <span class="add-count">+{{ getAnnotationCounts().add }}</span>
+                    <span class="remove-count">-{{ getAnnotationCounts().remove }}</span>
+                  </span>
+                } @else {
+                  <span class="label">Selected Point:</span>
+                  <span class="value">X: {{ clickX() }}, Y: {{ clickY() }}</span>
+                }
               } @else {
                 <span class="label">Selected Box:</span>
                 <span class="value">{{ getBoxCoordinates()?.[0] }}, {{ getBoxCoordinates()?.[1] }} to {{ getBoxCoordinates()?.[2] }}, {{ getBoxCoordinates()?.[3] }}</span>

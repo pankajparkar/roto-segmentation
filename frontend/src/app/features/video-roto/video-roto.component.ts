@@ -1,8 +1,17 @@
-import { Component, inject, signal, viewChild, ElementRef } from '@angular/core';
+import { Component, inject, signal, viewChild, ElementRef, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/services/api.service';
 import { BoxPrompt } from '../../core/models/api.models';
+
+// Annotation point with label (1 = add/foreground, 0 = remove/background)
+interface AnnotationPoint {
+  x: number;       // Video coordinates
+  y: number;
+  label: 0 | 1;    // 0 = background (remove), 1 = foreground (add)
+  displayX: number; // Display coordinates for rendering
+  displayY: number;
+}
 
 @Component({
   selector: 'app-video-roto',
@@ -25,10 +34,16 @@ export class VideoRotoComponent {
   // Selection mode: 'point' or 'box'
   selectionMode = signal<'point' | 'box'>('point');
 
-  // Click position (point mode)
+  // Annotation points (multiple points with labels)
+  annotationPoints = signal<AnnotationPoint[]>([]);
+
+  // Legacy single click (kept for backward compatibility)
   clickX = signal<number | null>(null);
   clickY = signal<number | null>(null);
   currentFrame = signal(0);
+
+  // Keyboard state for modifier keys
+  isAltPressed = signal(false);
 
   // Bounding box state (box mode)
   boxStart = signal<{ x: number; y: number } | null>(null);
@@ -61,6 +76,26 @@ export class VideoRotoComponent {
   private videoHeight = 0;
   private videoDuration = 0;
   private videoFps = 24; // Default, will try to detect
+
+  // Keyboard event listeners for modifier keys
+  @HostListener('window:keydown', ['$event'])
+  onKeyDown(event: KeyboardEvent): void {
+    if (event.key === 'Alt') {
+      this.isAltPressed.set(true);
+    }
+    // Undo last point with Ctrl/Cmd + Z
+    if ((event.ctrlKey || event.metaKey) && event.key === 'z') {
+      event.preventDefault();
+      this.undoLastPoint();
+    }
+  }
+
+  @HostListener('window:keyup', ['$event'])
+  onKeyUp(event: KeyboardEvent): void {
+    if (event.key === 'Alt') {
+      this.isAltPressed.set(false);
+    }
+  }
 
   onFileSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
@@ -246,19 +281,83 @@ export class VideoRotoComponent {
     }
 
     const rect = canvas.getBoundingClientRect();
-    const clickX = event.clientX - rect.left;
-    const clickY = event.clientY - rect.top;
-    const videoCoords = this.displayToVideoCoords(clickX, clickY, rect);
+    const displayX = event.clientX - rect.left;
+    const displayY = event.clientY - rect.top;
+    const videoCoords = this.displayToVideoCoords(displayX, displayY, rect);
 
-    console.log('Point Click:', { displayX: clickX, displayY: clickY, videoX: videoCoords.x, videoY: videoCoords.y });
+    // Determine if this is an add (1) or remove (0) point
+    // Alt + Click OR Right Click = Remove (background)
+    // Regular Click = Add (foreground)
+    const isRemove = this.isAltPressed() || event.button === 2;
+    const label: 0 | 1 = isRemove ? 0 : 1;
 
-    this.clickX.set(videoCoords.x);
-    this.clickY.set(videoCoords.y);
+    console.log('Annotation Click:', {
+      displayX,
+      displayY,
+      videoX: videoCoords.x,
+      videoY: videoCoords.y,
+      label,
+      action: label === 1 ? 'ADD' : 'REMOVE'
+    });
 
-    this.drawClickMarker(clickX, clickY, videoCoords.x, videoCoords.y);
+    // Add new annotation point
+    const newPoint: AnnotationPoint = {
+      x: videoCoords.x,
+      y: videoCoords.y,
+      label,
+      displayX,
+      displayY
+    };
 
-    // Get mask preview with point
-    this.getSegmentationPreview(videoCoords.x, videoCoords.y);
+    this.annotationPoints.update(points => [...points, newPoint]);
+
+    // Update legacy single click for backward compatibility (use first foreground point)
+    const foregroundPoints = this.annotationPoints().filter(p => p.label === 1);
+    if (foregroundPoints.length > 0) {
+      this.clickX.set(foregroundPoints[0].x);
+      this.clickY.set(foregroundPoints[0].y);
+    }
+
+    // Redraw all annotation markers
+    this.drawAnnotationMarkers();
+
+    // Get mask preview with all points
+    this.getSegmentationPreviewWithPoints();
+  }
+
+  // Prevent context menu on right-click (we use it for remove)
+  onFrameContextMenu(event: MouseEvent): void {
+    event.preventDefault();
+    // Trigger click handler for right-click remove
+    this.onFrameClick(event);
+  }
+
+  // Undo last annotation point
+  undoLastPoint(): void {
+    const points = this.annotationPoints();
+    if (points.length > 0) {
+      this.annotationPoints.update(pts => pts.slice(0, -1));
+      this.drawAnnotationMarkers();
+
+      // Update preview if we still have points
+      if (this.annotationPoints().length > 0) {
+        this.getSegmentationPreviewWithPoints();
+      } else {
+        this.clearOverlay();
+        this.maskPreviewUrl.set(null);
+        this.clickX.set(null);
+        this.clickY.set(null);
+      }
+    }
+  }
+
+  // Clear all annotation points
+  clearAllPoints(): void {
+    this.annotationPoints.set([]);
+    this.clickX.set(null);
+    this.clickY.set(null);
+    this.maskPreviewUrl.set(null);
+    this.clearOverlay();
   }
 
   onFrameMouseDown(event: MouseEvent): void {
@@ -547,6 +646,192 @@ export class VideoRotoComponent {
     }
   }
 
+  // Get segmentation preview with all annotation points
+  private async getSegmentationPreviewWithPoints(): Promise<void> {
+    const capturedFrame = this.capturedFrame();
+    const points = this.annotationPoints();
+    if (!capturedFrame || points.length === 0) return;
+
+    this.isLoadingPreview.set(true);
+    this.maskPreviewUrl.set(null);
+
+    try {
+      const response = await fetch(capturedFrame);
+      const blob = await response.blob();
+      const file = new File([blob], 'frame.jpg', { type: 'image/jpeg' });
+
+      // Convert annotation points to API format
+      const apiPoints = points.map(p => ({
+        x: p.x,
+        y: p.y,
+        label: p.label
+      }));
+
+      console.log('Sending annotation points to API:', apiPoints);
+
+      const maskBlob = await this.api.segmentImage(file, apiPoints).toPromise();
+
+      if (maskBlob) {
+        const maskUrl = URL.createObjectURL(maskBlob);
+        this.maskPreviewUrl.set(maskUrl);
+        this.drawMaskOverlayWithAnnotations(maskUrl);
+      }
+    } catch (err) {
+      console.error('Preview with annotations failed:', err);
+    } finally {
+      this.isLoadingPreview.set(false);
+    }
+  }
+
+  // Draw all annotation markers
+  private drawAnnotationMarkers(): void {
+    const frameCanvas = this.frameCanvas()?.nativeElement;
+    const overlayCanvas = this.overlayCanvas()?.nativeElement;
+
+    if (!frameCanvas || !overlayCanvas) return;
+
+    // Match overlay size to frame canvas
+    overlayCanvas.width = frameCanvas.width;
+    overlayCanvas.height = frameCanvas.height;
+    overlayCanvas.style.width = `${frameCanvas.width}px`;
+    overlayCanvas.style.height = `${frameCanvas.height}px`;
+
+    const ctx = overlayCanvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+    const points = this.annotationPoints();
+    const scaleX = overlayCanvas.width / this.videoWidth;
+    const scaleY = overlayCanvas.height / this.videoHeight;
+
+    points.forEach((point, index) => {
+      const displayX = point.x * scaleX;
+      const displayY = point.y * scaleY;
+      this.drawSingleAnnotationMarker(ctx, displayX, displayY, point.label, index + 1);
+    });
+  }
+
+  // Draw a single annotation marker (green for add, red for remove)
+  private drawSingleAnnotationMarker(
+    ctx: CanvasRenderingContext2D,
+    displayX: number,
+    displayY: number,
+    label: 0 | 1,
+    index: number
+  ): void {
+    const isAdd = label === 1;
+    const primaryColor = isAdd ? '#22c55e' : '#ef4444';  // Green for add, Red for remove
+    const secondaryColor = isAdd ? '#16a34a' : '#dc2626';
+
+    // Draw outer ring
+    ctx.beginPath();
+    ctx.arc(displayX, displayY, 14, 0, 2 * Math.PI);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(displayX, displayY, 12, 0, 2 * Math.PI);
+    ctx.strokeStyle = primaryColor;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Draw filled center
+    ctx.beginPath();
+    ctx.arc(displayX, displayY, 8, 0, 2 * Math.PI);
+    ctx.fillStyle = primaryColor;
+    ctx.fill();
+
+    // Draw + or - symbol
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+
+    if (isAdd) {
+      // Plus sign
+      ctx.beginPath();
+      ctx.moveTo(displayX - 4, displayY);
+      ctx.lineTo(displayX + 4, displayY);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(displayX, displayY - 4);
+      ctx.lineTo(displayX, displayY + 4);
+      ctx.stroke();
+    } else {
+      // Minus sign
+      ctx.beginPath();
+      ctx.moveTo(displayX - 4, displayY);
+      ctx.lineTo(displayX + 4, displayY);
+      ctx.stroke();
+    }
+
+    // Draw index number
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = secondaryColor;
+    ctx.lineWidth = 2;
+    const indexText = index.toString();
+    const textWidth = ctx.measureText(indexText).width;
+    ctx.strokeText(indexText, displayX - textWidth / 2, displayY + 24);
+    ctx.fillText(indexText, displayX - textWidth / 2, displayY + 24);
+  }
+
+  // Draw mask overlay and redraw annotation markers on top
+  private drawMaskOverlayWithAnnotations(maskUrl: string): void {
+    const frameCanvas = this.frameCanvas()?.nativeElement;
+    const overlayCanvas = this.overlayCanvas()?.nativeElement;
+
+    if (!frameCanvas || !overlayCanvas) return;
+
+    const maskImg = new Image();
+    maskImg.onload = () => {
+      const ctx = overlayCanvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+      // Create temp canvas for mask processing
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = overlayCanvas.width;
+      tempCanvas.height = overlayCanvas.height;
+      const tempCtx = tempCanvas.getContext('2d');
+      if (!tempCtx) return;
+
+      tempCtx.drawImage(maskImg, 0, 0, overlayCanvas.width, overlayCanvas.height);
+      const maskData = tempCtx.getImageData(0, 0, overlayCanvas.width, overlayCanvas.height);
+      const data = maskData.data;
+
+      // Create green overlay for mask
+      for (let i = 0; i < data.length; i += 4) {
+        const maskValue = data[i];
+        if (maskValue > 128) {
+          data[i] = 34;      // R
+          data[i + 1] = 197; // G
+          data[i + 2] = 94;  // B
+          data[i + 3] = 100; // A
+        } else {
+          data[i + 3] = 0;
+        }
+      }
+
+      ctx.putImageData(maskData, 0, 0);
+      this.drawMaskBorder(ctx, maskData);
+
+      // Redraw annotation markers on top of mask
+      const points = this.annotationPoints();
+      const scaleX = overlayCanvas.width / this.videoWidth;
+      const scaleY = overlayCanvas.height / this.videoHeight;
+
+      points.forEach((point, index) => {
+        const displayX = point.x * scaleX;
+        const displayY = point.y * scaleY;
+        this.drawSingleAnnotationMarker(ctx, displayX, displayY, point.label, index + 1);
+      });
+    };
+    maskImg.src = maskUrl;
+  }
+
   private drawMaskOverlay(maskUrl: string): void {
     const frameCanvas = this.frameCanvas()?.nativeElement;
     const overlayCanvas = this.overlayCanvas()?.nativeElement;
@@ -772,6 +1057,7 @@ export class VideoRotoComponent {
     this.boxStart.set(null);
     this.boxEnd.set(null);
     this.isDrawingBox.set(false);
+    this.annotationPoints.set([]);
     this.maskPreviewUrl.set(null);
     this.clearOverlay();
   }
@@ -785,12 +1071,24 @@ export class VideoRotoComponent {
 
   hasSelection(): boolean {
     if (this.selectionMode() === 'point') {
-      return this.clickX() !== null && this.clickY() !== null;
+      // Check if we have any annotation points (prefer new system)
+      const hasAnnotations = this.annotationPoints().length > 0;
+      const hasLegacyClick = this.clickX() !== null && this.clickY() !== null;
+      return hasAnnotations || hasLegacyClick;
     } else {
       const start = this.boxStart();
       const end = this.boxEnd();
       return start !== null && end !== null && !this.isDrawingBox();
     }
+  }
+
+  // Get count of add vs remove points for UI display
+  getAnnotationCounts(): { add: number; remove: number } {
+    const points = this.annotationPoints();
+    return {
+      add: points.filter(p => p.label === 1).length,
+      remove: points.filter(p => p.label === 0).length
+    };
   }
 
   getBoxCoordinates(): [number, number, number, number] | null {
@@ -813,6 +1111,7 @@ export class VideoRotoComponent {
     this.boxStart.set(null);
     this.boxEnd.set(null);
     this.isDrawingBox.set(false);
+    this.annotationPoints.set([]);
     this.currentFrame.set(0);
     this.error.set(null);
     this.result.set(null);
@@ -831,6 +1130,10 @@ export class VideoRotoComponent {
 
     const isBoxMode = this.selectionMode() === 'box';
     const boxCoords = this.getBoxCoordinates();
+    const points = this.annotationPoints();
+    const hasAnnotations = points.length > 0;
+
+    // Legacy fallback
     const x = this.clickX();
     const y = this.clickY();
 
@@ -838,6 +1141,7 @@ export class VideoRotoComponent {
     console.log('API Request:', {
       file: file.name,
       mode: this.selectionMode(),
+      annotationPoints: points.length,
       clickX: x,
       clickY: y,
       box: boxCoords,
@@ -853,14 +1157,22 @@ export class VideoRotoComponent {
     this.progress.set(10);
 
     try {
+      // Convert annotation points to API format
+      const apiPoints = hasAnnotations ? points.map(p => ({
+        x: p.x,
+        y: p.y,
+        label: p.label
+      })) : undefined;
+
       const resultBlob = await this.api.quickRoto(
         file,
-        isBoxMode ? null : x,
-        isBoxMode ? null : y,
+        isBoxMode || hasAnnotations ? null : x,
+        isBoxMode || hasAnnotations ? null : y,
         this.currentFrame(),
         this.objectLabel(),
         this.outputFormat(),
-        isBoxMode ? boxCoords ?? undefined : undefined
+        isBoxMode ? boxCoords ?? undefined : undefined,
+        apiPoints
       ).toPromise();
 
       this.progress.set(100);
